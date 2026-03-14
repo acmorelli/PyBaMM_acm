@@ -31,6 +31,7 @@ from .basic_dfn_composite import BasicDFNComposite
 from .Yang2017 import Yang2017
 from .mpm import MPM
 from .msmr import MSMR
+from .dfn_ccpm import DFN_CCPM
 from .basic_splitOCVR import SplitOCVR
 from .util import (
     check_if_composite,
