@@ -4,16 +4,11 @@ import pybamm
 
 class CCPMPositiveParticle(FickianDiffusion):
     """
-    Step-4 version.
+    Step-5 version.
 
-    Still inherits the standard positive-particle Fickian diffusion model so that
-    the full DFN remains compatible, but now also introduces the first CCPM
-    state variables:
-        - g_a
-        - g_b
-        - g_c
-
-    For now these are only placeholder states with trivial time evolution.
+    Still keeps the standard Fickian positive-particle model for DFN compatibility,
+    but now adds CCPM branch variables and a first CCPM-derived stoichiometry
+    diagnostic.
     """
 
     def __init__(
@@ -33,12 +28,10 @@ class CCPMPositiveParticle(FickianDiffusion):
         )
 
     def get_fundamental_variables(self):
-        # Keep all standard DFN positive-particle variables
         variables = super().get_fundamental_variables()
 
         electrode_domain = f"{self.domain} electrode"
 
-        # First CCPM branch-density placeholders
         g_a = pybamm.Variable(
             "Positive CCPM branch a density",
             domain=electrode_domain,
@@ -70,39 +63,42 @@ class CCPMPositiveParticle(FickianDiffusion):
         g_b = variables["Positive CCPM branch b density"]
         g_c = variables["Positive CCPM branch c density"]
 
-        # Simple diagnostic variables for checking that the CCPM states exist
+        # Placeholder representative stoichiometries for the three branches
+        theta_a = pybamm.Scalar(0.05)
+        theta_b = pybamm.Scalar(0.50)
+        theta_c = pybamm.Scalar(0.95)
+
+        theta_ccpm = theta_a * g_a + theta_b * g_b + theta_c * g_c
+
         variables.update(
             {
                 "Positive CCPM branch fractions sum": g_a + g_b + g_c,
                 "Positive CCPM pseudo-stoichiometry": g_b + g_c,
+                "Positive CCPM stoichiometry": theta_ccpm,
+                "X-averaged positive CCPM stoichiometry": pybamm.x_average(theta_ccpm),
             }
         )
 
         return variables
 
     def set_rhs(self, variables):
-        # Keep standard DFN particle dynamics
         super().set_rhs(variables)
 
         g_a = variables["Positive CCPM branch a density"]
         g_b = variables["Positive CCPM branch b density"]
         g_c = variables["Positive CCPM branch c density"]
 
-        # Trivial placeholder dynamics:
-        # start entirely on branch a and stay there
         self.rhs[g_a] = pybamm.Scalar(0)
         self.rhs[g_b] = pybamm.Scalar(0)
         self.rhs[g_c] = pybamm.Scalar(0)
 
     def set_initial_conditions(self, variables):
-        # Keep standard DFN particle initial conditions
         super().set_initial_conditions(variables)
 
         g_a = variables["Positive CCPM branch a density"]
         g_b = variables["Positive CCPM branch b density"]
         g_c = variables["Positive CCPM branch c density"]
 
-        # Initially all "mass" on branch a
         self.initial_conditions[g_a] = pybamm.Scalar(1)
         self.initial_conditions[g_b] = pybamm.Scalar(0)
         self.initial_conditions[g_c] = pybamm.Scalar(0)
