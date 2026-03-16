@@ -4,10 +4,16 @@ import pybamm
 
 class CCPMPositiveParticle(FickianDiffusion):
     """
-    Step-3 debug version.
+    Step-4 version.
 
-    Still behaves like standard Fickian diffusion, but prints the variables
-    created by the positive-particle submodel so we can inspect the interface.
+    Still inherits the standard positive-particle Fickian diffusion model so that
+    the full DFN remains compatible, but now also introduces the first CCPM
+    state variables:
+        - g_a
+        - g_b
+        - g_c
+
+    For now these are only placeholder states with trivial time evolution.
     """
 
     def __init__(
@@ -27,40 +33,76 @@ class CCPMPositiveParticle(FickianDiffusion):
         )
 
     def get_fundamental_variables(self):
+        # Keep all standard DFN positive-particle variables
         variables = super().get_fundamental_variables()
 
-        print("\n=== CCPMPositiveParticle: FUNDAMENTAL VARIABLES ===")
-        for key in sorted(variables.keys()):
-            if "positive" in key.lower():
-                print(key)
+        electrode_domain = f"{self.domain} electrode"
 
-        dummy = pybamm.Variable(
-            "Positive electrode CCPM dummy variable",
-            domain=f"{self.domain} electrode",
+        # First CCPM branch-density placeholders
+        g_a = pybamm.Variable(
+            "Positive CCPM branch a density",
+            domain=electrode_domain,
         )
+        g_b = pybamm.Variable(
+            "Positive CCPM branch b density",
+            domain=electrode_domain,
+        )
+        g_c = pybamm.Variable(
+            "Positive CCPM branch c density",
+            domain=electrode_domain,
+        )
+
         variables.update(
             {
-                "Positive electrode CCPM dummy variable": dummy,
+                "Positive CCPM branch a density": g_a,
+                "Positive CCPM branch b density": g_b,
+                "Positive CCPM branch c density": g_c,
+                "Positive CCPM total density": g_a + g_b + g_c,
             }
         )
+
         return variables
 
     def get_coupled_variables(self, variables):
         variables = super().get_coupled_variables(variables)
 
-        print("\n=== CCPMPositiveParticle: COUPLED VARIABLES (positive-related) ===")
-        for key in sorted(variables.keys()):
-            if "positive" in key.lower():
-                print(key)
+        g_a = variables["Positive CCPM branch a density"]
+        g_b = variables["Positive CCPM branch b density"]
+        g_c = variables["Positive CCPM branch c density"]
+
+        # Simple diagnostic variables for checking that the CCPM states exist
+        variables.update(
+            {
+                "Positive CCPM branch fractions sum": g_a + g_b + g_c,
+                "Positive CCPM pseudo-stoichiometry": g_b + g_c,
+            }
+        )
 
         return variables
 
     def set_rhs(self, variables):
+        # Keep standard DFN particle dynamics
         super().set_rhs(variables)
-        dummy = variables["Positive electrode CCPM dummy variable"]
-        self.rhs[dummy] = pybamm.Scalar(0)
+
+        g_a = variables["Positive CCPM branch a density"]
+        g_b = variables["Positive CCPM branch b density"]
+        g_c = variables["Positive CCPM branch c density"]
+
+        # Trivial placeholder dynamics:
+        # start entirely on branch a and stay there
+        self.rhs[g_a] = pybamm.Scalar(0)
+        self.rhs[g_b] = pybamm.Scalar(0)
+        self.rhs[g_c] = pybamm.Scalar(0)
 
     def set_initial_conditions(self, variables):
+        # Keep standard DFN particle initial conditions
         super().set_initial_conditions(variables)
-        dummy = variables["Positive electrode CCPM dummy variable"]
-        self.initial_conditions[dummy] = pybamm.Scalar(0)
+
+        g_a = variables["Positive CCPM branch a density"]
+        g_b = variables["Positive CCPM branch b density"]
+        g_c = variables["Positive CCPM branch c density"]
+
+        # Initially all "mass" on branch a
+        self.initial_conditions[g_a] = pybamm.Scalar(1)
+        self.initial_conditions[g_b] = pybamm.Scalar(0)
+        self.initial_conditions[g_c] = pybamm.Scalar(0)
