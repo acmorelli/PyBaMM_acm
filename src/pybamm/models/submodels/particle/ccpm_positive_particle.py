@@ -4,11 +4,11 @@ import pybamm
 
 class CCPMPositiveParticle(FickianDiffusion):
     """
-    Step-5 version.
+    Step-6 version.
 
-    Still keeps the standard Fickian positive-particle model for DFN compatibility,
-    but now adds CCPM branch variables and a first CCPM-derived stoichiometry
-    diagnostic.
+    Keeps the standard Fickian positive-particle model for DFN compatibility,
+    while adding CCPM branch states, a CCPM-derived stoichiometry diagnostic,
+    and now a first CCPM-derived open-circuit-potential diagnostic.
     """
 
     def __init__(
@@ -70,12 +70,19 @@ class CCPMPositiveParticle(FickianDiffusion):
 
         theta_ccpm = theta_a * g_a + theta_b * g_b + theta_c * g_c
 
+        # First placeholder CCPM OCP diagnostic
+        U0 = pybamm.Scalar(3.40)
+        a = pybamm.Scalar(0.20)
+        U_ccpm = U0 + a * (1 - theta_ccpm)
+
         variables.update(
             {
                 "Positive CCPM branch fractions sum": g_a + g_b + g_c,
                 "Positive CCPM pseudo-stoichiometry": g_b + g_c,
                 "Positive CCPM stoichiometry": theta_ccpm,
                 "X-averaged positive CCPM stoichiometry": pybamm.x_average(theta_ccpm),
+                "Positive CCPM open-circuit potential [V]": U_ccpm,
+                "X-averaged positive CCPM open-circuit potential [V]": pybamm.x_average(U_ccpm),
             }
         )
 
