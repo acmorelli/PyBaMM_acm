@@ -4,14 +4,20 @@ import pybamm
 
 class CCPMPositiveParticle(FickianDiffusion):
     """
-    Step-2b compatibility placeholder.
+    Step-3 debug version.
 
-    For now this is still the standard Fickian positive-particle submodel,
-    but with one extra dummy CCPM variable added so we can keep the DFN build
-    working while preparing the CCPM insertion point.
+    Still behaves like standard Fickian diffusion, but prints the variables
+    created by the positive-particle submodel so we can inspect the interface.
     """
 
-    def __init__(self, param, domain="positive", options=None, phase="primary", x_average=False):
+    def __init__(
+        self,
+        param,
+        domain="positive",
+        options=None,
+        phase="primary",
+        x_average=False,
+    ):
         super().__init__(
             param,
             domain,
@@ -23,6 +29,11 @@ class CCPMPositiveParticle(FickianDiffusion):
     def get_fundamental_variables(self):
         variables = super().get_fundamental_variables()
 
+        print("\n=== CCPMPositiveParticle: FUNDAMENTAL VARIABLES ===")
+        for key in sorted(variables.keys()):
+            if "positive" in key.lower():
+                print(key)
+
         dummy = pybamm.Variable(
             "Positive electrode CCPM dummy variable",
             domain=f"{self.domain} electrode",
@@ -32,6 +43,16 @@ class CCPMPositiveParticle(FickianDiffusion):
                 "Positive electrode CCPM dummy variable": dummy,
             }
         )
+        return variables
+
+    def get_coupled_variables(self, variables):
+        variables = super().get_coupled_variables(variables)
+
+        print("\n=== CCPMPositiveParticle: COUPLED VARIABLES (positive-related) ===")
+        for key in sorted(variables.keys()):
+            if "positive" in key.lower():
+                print(key)
+
         return variables
 
     def set_rhs(self, variables):
