@@ -221,3 +221,24 @@ R_p_edge = pybamm.SpatialVariableEdge(
     },
     coord_sys="cartesian",
 )
+
+# new concentration domain
+c_p = pybamm.SpatialVariable(
+    "c_p",
+    domain=["positive particle concentration"],
+    auxiliary_domains={
+        "secondary": "positive electrode",
+        "tertiary": "current collector",
+    },
+    coord_sys="cartesian",
+)
+
+c_p_edge = pybamm.SpatialVariableEdge(
+    "c_p",
+    domain=["positive particle concentration"],
+    auxiliary_domains={
+        "secondary": "positive electrode",
+        "tertiary": "current collector",
+    },
+    coord_sys="cartesian",
+)
