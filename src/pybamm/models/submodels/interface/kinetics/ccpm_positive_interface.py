@@ -32,7 +32,10 @@ class CCPMPositiveInterface(BaseKinetics):
         j_prime_p0 = pybamm.Scalar(2) #TODO: reaction rate constant in positive electrode
         c_e_init = self.param.c_e_init
         omega = pybamm.Scalar(3) #TODO self.param?? Eq 13 from Clarke2026
-        c1_star = pybamm.Scalar(0.092) # from Clarke
+        c1_star = 0.071* c_p_max # from Clarke
+        c2_star = 0.929* c_p_max # from Clarke
+        c_sp1 = 0.2113 * c_p_max # from Clarke
+        c_sp2 = 0.7887 * c_p_max # from Clarke
         
         # get macroscopic fields
         phi_p = variables["Positive electrode potential [V]"]
@@ -41,35 +44,35 @@ class CCPMPositiveInterface(BaseKinetics):
         c_e = variables["Positive electrolyte concentration [mol.m-3]"]
         
         # broadcast x-domain to the concentration grid (make it available for every c point)
-        phi_e_broadcast=pybamm.PrimaryBroadcast(phi_e, "positive particle concentration")
-        phi_p_broadcast = pybamm.PrimaryBroadcast(phi_p, "positive particle concentration" )
-        T_p_broadcast = pybamm.PrimaryBroadcast(T_p, "positive particle concentration")
-        c_e_broadcast= pybamm.PrimaryBroadcast(c_e, "positive particle concentration")
+        phi_e_broadcast=pybamm.PrimaryBroadcast(phi_e, "CCPM positive particle concentration")
+        phi_p_broadcast = pybamm.PrimaryBroadcast(phi_p, "CCPM positive particle concentration" )
+        T_p_broadcast = pybamm.PrimaryBroadcast(T_p, "CCPM positive particle concentration")
+        c_e_broadcast= pybamm.PrimaryBroadcast(c_e, "CCPM positive particle concentration")
         
-        # calculate branch specfic current j_tr_a on the c-grid
+        # calculate branch specfic current j_tr_branchName on the c-grid
         # for this, we define the chemical potential as a function of the spatial variable c_p
-        #mu_a = self.param.mu_a(c_p) #TODO
-        
         mu= R*T_p_broadcast * ( pybamm.log(c_p/(c_p_max-c_p)) + omega*(1-(2*theta_p)))
-        #mu=0
         common_factor = j_prime_p0 * (c_e_broadcast / c_e_init) ** 0.5
         overpotential_term_singlePhase = (F * (phi_p_broadcast - phi_e_broadcast) - F * U_eq_p0 + mu) / (2 * R * T_p_broadcast)
         overpotential_term_mixedPhase= (F * (phi_p_broadcast - phi_e_broadcast) - F * U_eq_p0) / (2 * R * T_p_broadcast)
         
-        # linearized prototype, no sinh
-        j_tr_a = common_factor * (c_p / c_p_max) ** 0.5 * pybamm.sinh(overpotential_term_singlePhase)
-        j_tr_b = common_factor * (c1_star / c_p_max) ** 0.5 * pybamm.sinh(overpotential_term_mixedPhase)
-        j_tr_c = common_factor * (c_p / c_p_max) ** 0.5 * pybamm.sinh(overpotential_term_singlePhase)
+        # signal: from particle to electrolyte, so positive j means lithium leaving the particle (delithiation)
+        j_tr_a = common_factor * (c_p / c_p_max) ** 0.5 * (1-(c_p/c_p_max))**0.5 * pybamm.sinh(overpotential_term_singlePhase)
+        j_tr_b = common_factor * (c1_star / c_p_max) ** 0.5 * (1-(c1_star/c_p_max))**0.5 * pybamm.sinh(overpotential_term_mixedPhase)
+        j_tr_c = common_factor * (c_p / c_p_max) ** 0.5 * (1-(c_p/c_p_max))**0.5 * pybamm.sinh(overpotential_term_singlePhase)
         
-        
-        j_tr_a = common_factor * (c_p / c_p_max) ** 0.5 * overpotential_term_singlePhase
-        j_tr_b = common_factor * (c1_star / c_p_max) ** 0.5 * overpotential_term_mixedPhase
-        j_tr_c = common_factor * (c_p / c_p_max) ** 0.5 * overpotential_term_singlePhase 
-        # differential step - rate of change R(c,A,V,s)
         
         # integration - total current: couple back macroscopic domain
-        j_tot = pybamm.Integral((g_a * j_tr_a) + (g_b * j_tr_b) + (g_c * j_tr_c), c_p)
-        #j_tot= pybamm.Integral(((g_a * j_tr_a) + (g_b * j_tr_b) + (g_c * j_tr_c))*0, c_p) #TODO remove after debug
+        # IMPORTANT. integrate only ovr the range of the branch, otherwise numerical leaks lead to big errors.
+        # choose one-sided intervals consistently to avoid double counting at boundaries
+        mask_a = (c_p <= c_sp1)
+        mask_b = (c1_star < c_p) * (c_p <= c2_star)
+        mask_c = (c_sp2 < c_p)
+
+        j_a_tot = pybamm.Integral(mask_a * g_a * j_tr_a, c_p)
+        j_b_tot = pybamm.Integral(mask_b * g_b * j_tr_b, c_p)
+        j_c_tot = pybamm.Integral(mask_c * g_c * j_tr_c, c_p)
+        j_tot = j_a_tot + j_b_tot + j_c_tot
         return j_tr_a, j_tr_b, j_tr_c, j_tot
     
     def _get_ccpm_rates_and_currents(self, variables):
@@ -111,7 +114,7 @@ class CCPMPositiveInterface(BaseKinetics):
         j_vol = a_s_p * self.j_tot
         variables.update({
             # Standard PyBaMM expects this variable for the DFN:
-            "CCPM Positive electrode interfacial current density [A.m-2]": self.j_tot,
+            "Positive electrode interfacial current density [A.m-2]": self.j_tot,
             
             "Positive electrode volumetric interfacial current density [A.m-3]": j_vol,
                 
@@ -124,6 +127,9 @@ class CCPMPositiveInterface(BaseKinetics):
             "CCPM Branch A lithiation rate": self.R_a,
             "CCPM Branch B lithiation rate": self.R_b,
             "CCPM Branch C lithiation rate": self.R_c,
+            "X-averaged CCPM Branch A lithiation rate": pybamm.x_average(self.R_a),
+            "X-averaged CCPM Branch B lithiation rate": pybamm.x_average(self.R_b),
+            "X-averaged CCPM Branch C lithiation rate": pybamm.x_average(self.R_c),
         })
         
         return variables

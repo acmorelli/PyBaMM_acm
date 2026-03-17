@@ -1,40 +1,79 @@
-# C:\Users\dottavianomo\programming\PyBaMM_acm\src\pybamm\models\full_battery_models\lithium_ion\dfn_ccpm.py
 import pybamm
 
-from .base_lithium_ion_model import BaseModel
 from .dfn import DFN
 from ...submodels.particle.ccpm_positive_particle import CCPMPositiveParticle
 from ...submodels.interface.kinetics.ccpm_positive_interface import CCPMPositiveInterface
+from pybamm.geometry import ccpm_spatial_vars as ccpm_vars
+
+
 class DFN_CCPM(DFN):
-        
-    def __init__(self, options=None, name="Doyle-Fuller-Newman CCPM model", build=True):
-        # inherit other init
-        super().__init__(options, name, build=build)
-        
+    def __init__(
+        self,
+        options=None,
+        name="Doyle-Fuller-Newman CCPM model",
+        build=True,
+        initial_branch="A",
+    ):
+        self.initial_branch = initial_branch.upper()
+        super().__init__(options=options, name=name, build=build)
+
     @property
     def default_geometry(self):
         geometry = super().default_geometry
-        eps_c = pybamm.Scalar(1e-6) * self.param.p.prim.c_max
-        geometry["positive particle concentration"] = {
-            "c_p": {        
-                "min": eps_c,
-                "max": self.param.p.prim.c_max - eps_c, #TODO is this truncation the best strategy?
-    }
-        }
 
+        c_max = self.param.p.prim.c_max
+        eps_c = pybamm.Scalar(1e-6) * c_max
+
+        c1_star = pybamm.Scalar(0.071) * c_max
+        c2_star = pybamm.Scalar(0.929) * c_max
+        c_sp1 = pybamm.Scalar(0.2113) * c_max
+        c_sp2 = pybamm.Scalar(0.7887) * c_max
+
+        geometry.update(
+            {
+                "CCPM positive particle branch a": {
+                    ccpm_vars.c_a: {
+                        "min": eps_c,
+                        "max": c_sp1,
+                    }
+                },
+                "CCPM positive particle branch b": {
+                    ccpm_vars.c_b: {
+                        "min": c1_star,
+                        "max": c2_star,
+                    }
+                },
+                "CCPM positive particle branch c": {
+                    ccpm_vars.c_c: {
+                        "min": c_sp2,
+                        "max": c_max - eps_c,
+                    }
+                },
+            }
+        )
         return geometry
 
     @property
     def default_var_pts(self):
         var_pts = super().default_var_pts
-        var_pts.update({"c_p": 1000})
+        var_pts.update(
+            {
+                "c_a": 30,
+                "c_b": 40,
+                "c_c": 30,
+            }
+        )
         return var_pts
 
     @property
     def default_submesh_types(self):
         submesh_types = super().default_submesh_types
         submesh_types.update(
-            {"positive particle concentration": pybamm.Uniform1DSubMesh}
+            {
+                "CCPM positive particle branch a": pybamm.Uniform1DSubMesh,
+                "CCPM positive particle branch b": pybamm.Uniform1DSubMesh,
+                "CCPM positive particle branch c": pybamm.Uniform1DSubMesh,
+            }
         )
         return submesh_types
 
@@ -42,26 +81,27 @@ class DFN_CCPM(DFN):
     def default_spatial_methods(self):
         spatial_methods = super().default_spatial_methods
         spatial_methods.update(
-            {"positive particle concentration": pybamm.FiniteVolume()}
+            {
+                "CCPM positive particle branch a": pybamm.FiniteVolume(),
+                "CCPM positive particle branch b": pybamm.FiniteVolume(),
+                "CCPM positive particle branch c": pybamm.FiniteVolume(),
+            }
         )
         return spatial_methods
-    
 
     def set_particle_submodel(self):
         super().set_particle_submodel()
-        
-        # replace only cathode submodel
         self.submodels["positive primary particle"] = CCPMPositiveParticle(
             self.param,
             domain="positive",
             options=self.options,
             phase="primary",
             x_average=False,
+            initial_branch=self.initial_branch,
         )
 
-
     def set_intercalation_kinetics_submodel(self):
-        # Set kinetics for negative electrode (standard kinetics)
+        # keep standard negative-electrode kinetics
         domain = "negative"
         electrode_type = self.options.electrode_types[domain]
         if electrode_type == "porous":
@@ -80,7 +120,7 @@ class DFN_CCPM(DFN):
                     )
                 )
 
-        # Set kinetics for positive electrode (CCPM kinetics)
+        # replace standard positive-electrode kinetics by CCPM kinetics
         domain = "positive"
         electrode_type = self.options.electrode_types[domain]
         if electrode_type == "porous":
@@ -97,5 +137,3 @@ class DFN_CCPM(DFN):
                         self.param, domain, "lithium-ion main", self.options
                     )
                 )
-
-    

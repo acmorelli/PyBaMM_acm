@@ -225,7 +225,7 @@ R_p_edge = pybamm.SpatialVariableEdge(
 # new concentration domain
 c_p = pybamm.SpatialVariable(
     "c_p",
-    domain=["positive particle concentration"],
+    domain=["CCPM positive particle concentration"],
     auxiliary_domains={
         "secondary": "positive electrode",
         "tertiary": "current collector",
@@ -235,7 +235,7 @@ c_p = pybamm.SpatialVariable(
 
 c_p_edge = pybamm.SpatialVariableEdge(
     "c_p",
-    domain=["positive particle concentration"],
+    domain=["CCPM positive particle concentration"],
     auxiliary_domains={
         "secondary": "positive electrode",
         "tertiary": "current collector",
