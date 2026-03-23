@@ -1,7 +1,8 @@
 import numpy as np
 import pybamm
 import matplotlib.pyplot as plt
-
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from pybamm.models.full_battery_models.lithium_ion.dfn_ccpm import DFN_CCPM
 
 
@@ -30,9 +31,7 @@ parameter_values = pybamm.ParameterValues("Prada2013")
 model = DFN_CCPM(initial_branch="A")
 
 parameter_values.update({
-    "Current function [A]": -2.0,
-    "Lower voltage cut-off [V]": 2.0,
-    "Upper voltage cut-off [V]": 5.0,
+    "Current function [A]": 0.077, # discharge. Prada2013 starts with approx 90% SOC (delithiated)
 })
 
 sim = pybamm.Simulation(
@@ -42,7 +41,9 @@ sim = pybamm.Simulation(
 )
 
 # Short time window first
-t_eval = np.linspace(0, 50, 21)
+t1 = np.linspace(0, 2, 10, endpoint=False)  
+t2 = np.linspace(2, 50, 5)                 
+t_eval = np.concatenate([t1, t2])
 
 print("solving...")
 solution = sim.solve(t_eval=t_eval)
@@ -72,15 +73,21 @@ R_c = arr(solution, "CCPM Branch C lithiation rate")
 
 j_ccpm = arr(solution, "CCPM Positive electrode interfacial current density [A.m-2]")
 
-
+Mdot_rhs= arr(solution, "Branch A PDF CCPM RHS")
+Mdot_fd= np.diff(m_a) / np.diff(time)
 # -----------------------------
 # Print sanity checks
 # -----------------------------
+
+print('initial ccpm particle concentration grid: ', arr(solution, "Initial CCPM particle concentration"))
 print("=== MASS CHECK ===")
 print(f"Initial masses:  A={m_a[0]:.6e}, B={m_b[0]:.6e}, C={m_c[0]:.6e}, total={m_tot[0]:.6e}")
 print(f"Final masses:    A={m_a[-1]:.6e}, B={m_b[-1]:.6e}, C={m_c[-1]:.6e}, total={m_tot[-1]:.6e}")
 print(f"Total mass drift: {m_tot[-1] - m_tot[0]:.6e}")
 print(f"Min/Max total mass over time: {np.min(m_tot):.6e} / {np.max(m_tot):.6e}")
+print('PDF RHS integral rhs_a over c_p: ,', Mdot_rhs)
+print('derivative mass over time: ',Mdot_fd)
+print('R_a: ', R_a)
 print()
 
 print("=== NON-NEGATIVITY CHECK ===")
@@ -135,35 +142,55 @@ else:
 # -----------------------------
 # Plots
 # -----------------------------
-plt.figure()
-plt.plot(time, m_a, label="m_a")
-plt.plot(time, m_b, label="m_b")
-plt.plot(time, m_c, label="m_c")
-plt.plot(time, m_tot, label="m_tot")
-plt.xlabel("Time [s]")
-plt.ylabel("X-averaged branch mass")
-plt.legend()
-plt.tight_layout()
 
-plt.figure()
-plt.plot(time, theta_ccpm, label="theta_ccpm")
-plt.xlabel("Time [s]")
-plt.ylabel("X-averaged CCPM stoichiometry")
-plt.legend()
-plt.tight_layout()
+fig = make_subplots(
+    rows=4,
+    cols=1,
+    shared_xaxes=True,
+    vertical_spacing=0.06,
+    subplot_titles=(
+        "Branch masses",
+        "CCPM stoichiometry",
+        "Terminal voltage",
+        "Interfacial current density",
+    ),
+)
 
-plt.figure()
-plt.plot(time, voltage, label="Terminal voltage [V]")
-plt.xlabel("Time [s]")
-plt.ylabel("Voltage [V]")
-plt.legend()
-plt.tight_layout()
+# 1) Branch masses
+fig.add_trace(go.Scatter(x=time, y=m_a, mode="lines", name="m_a"), row=1, col=1)
+fig.add_trace(go.Scatter(x=time, y=m_b, mode="lines", name="m_b"), row=1, col=1)
+fig.add_trace(go.Scatter(x=time, y=m_c, mode="lines", name="m_c"), row=1, col=1)
+fig.add_trace(go.Scatter(x=time, y=m_tot, mode="lines", name="m_tot"), row=1, col=1)
 
-plt.figure()
-plt.plot(time, j_ccpm[-1,:], label="j_ccpm")
-plt.xlabel("Time [s]")
-plt.ylabel("Interfacial current density [A.m-2]")
-plt.legend()
-plt.tight_layout()
+# 2) Stoichiometry
+fig.add_trace(
+    go.Scatter(x=time, y=theta_ccpm, mode="lines", name="theta_ccpm"),
+    row=2, col=1
+)
 
-plt.show()
+# 3) Voltage
+fig.add_trace(
+    go.Scatter(x=time, y=voltage, mode="lines", name="Terminal voltage [V]"),
+    row=3, col=1
+)
+
+# 4) Interfacial current density
+fig.add_trace(
+    go.Scatter(x=time, y=j_ccpm[-1, :], mode="lines", name="j_ccpm"),
+    row=4, col=1
+)
+
+fig.update_xaxes(title_text="Time [s]", row=4, col=1)
+fig.update_yaxes(title_text="X-averaged branch mass", row=1, col=1)
+fig.update_yaxes(title_text="X-averaged CCPM stoichiometry", row=2, col=1)
+fig.update_yaxes(title_text="Voltage [V]", row=3, col=1)
+fig.update_yaxes(title_text="Interfacial current density [A.m-2]", row=4, col=1)
+
+fig.update_layout(
+    height=1000,
+    width=1100,
+    hovermode="x unified",   # one hover box for all visible traces at same x
+    legend_title="Click traces to hide/show",
+)
+
+fig.show()

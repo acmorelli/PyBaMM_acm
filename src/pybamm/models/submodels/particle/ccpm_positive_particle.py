@@ -79,17 +79,36 @@ class CCPMPositiveParticle(FickianDiffusion):
         # Keep standard Fickian variables to avoid breaking DFN dependency
         variables.update(super().get_fundamental_variables())
         return variables
+    def _branch_geometry(self, c_p):
+        c_max = self.param.p.prim.c_max
+
+        c1_star = pybamm.Scalar(0.0710) * c_max
+        c_sp1   = pybamm.Scalar(0.2113) * c_max
+        c_sp2   = pybamm.Scalar(0.7887) * c_max
+        c2_star = pybamm.Scalar(0.9290) * c_max
+
+        # same boolean-mask style you already used
+        mask_a = (c_p <= c_sp1)
+        mask_b = (c_p >= c1_star) * (c_p <= c2_star)
+        mask_c = (c_p >= c_sp2)
+
+        return c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c
     
     def get_coupled_variables(self, variables):
         #TODO: remove inheritance after full integration
         variables.update(super().get_coupled_variables(variables))
         # Retrieve our PDFs and the concentration grid
-        g_a = variables["Branch A PDF CCPM"]
-        g_b = variables["Branch B PDF CCPM"]
-        g_c = variables["Branch C PDF CCPM"]
+        g_a_unmasked = variables["Branch A PDF CCPM"]
+        g_b_unmasked = variables["Branch B PDF CCPM"]
+        g_c_unmasked = variables["Branch C PDF CCPM"]
         c_p = variables["CCPM positive particle concentration"]
         c_max = self.param.p.prim.c_max
-        
+
+        # mask density functions
+        c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = self._branch_geometry(c_p)
+        g_a = g_a_unmasked * mask_a
+        g_b = g_b_unmasked * mask_b
+        g_c = g_c_unmasked * mask_c
         # 2. Calculate the average stoichiometry for the CCPM
         # This is the integral of (c * total_PDF) / c_max
         # This replaces the old 'theta_a_ref' logic with real PDF physics
@@ -103,9 +122,12 @@ class CCPMPositiveParticle(FickianDiffusion):
         m_tot = m_a + m_b + m_c
         
         # include rhs_c
-        cbar_c = pybamm.Integral(g_c * c_p, c_p) / m_c # average concentration in branch C
+        cbar_c = pybamm.Integral(g_c * c_p, c_p) / pybamm.Maximum(m_c, 1e-16) # average concentration in branch C
         
         variables.update({
+            "Branch A PDF CCPM Masked": g_a,
+            "Branch B PDF CCPM Masked": g_b,
+            "Branch C PDF CCPM Masked": g_c,
             "CCPM Branch A mass": m_a,
             "CCPM Branch B mass": m_b,
             "CCPM Branch C mass": m_c,
@@ -127,12 +149,16 @@ class CCPMPositiveParticle(FickianDiffusion):
         return variables
 
     def set_rhs(self, variables):
-        g_a = variables["Branch A PDF CCPM"]
-        g_b = variables["Branch B PDF CCPM"]
-        g_c = variables["Branch C PDF CCPM"]
+        g_a_unmasked = variables["Branch A PDF CCPM"]
+        g_b_unmasked = variables["Branch B PDF CCPM"]
+        g_c_unmasked = variables["Branch C PDF CCPM"]
+        g_a = variables["Branch A PDF CCPM Masked"]
+        g_b = variables["Branch B PDF CCPM Masked"]
+        g_c = variables["Branch C PDF CCPM Masked"]
         R_a = variables["CCPM Branch A lithiation rate"]
         R_b = variables["CCPM Branch B lithiation rate"]
         R_c = variables["CCPM Branch C lithiation rate"]
+        c_p= variables["CCPM positive particle concentration"]
         
         def adv_flux(g, R):
             R_pos = pybamm.Maximum(R, 0)
@@ -146,25 +172,32 @@ class CCPMPositiveParticle(FickianDiffusion):
         rhs_a = -pybamm.div(F_a)
         rhs_b = -pybamm.div(F_b)
         rhs_c = -pybamm.div(F_c)
-        
-        #sources place holders
+        # track rhs for debug
+        rhs_int = pybamm.Integral(rhs_a, c_p)
+        variables.update({
+            "Branch A PDF CCPM RHS": rhs_int,
+            "Branch A CCPM Flux": F_a,
+            "Branch B CCPM Flux": F_b,
+            "Branch C CCPM Flux": F_c,
+            })
+        #sources
         S_a, S_b, S_c = self._get_transition_sources(variables)
         self.rhs = {
-            g_a: rhs_a + S_a,
-            g_b: rhs_b + S_b,
-            g_c: rhs_c + S_c,
+            g_a_unmasked: rhs_a + S_a,
+            g_b_unmasked: rhs_b + S_b,
+            g_c_unmasked: rhs_c + S_c,
         }
         
     def _get_transition_sources(self, variables):
         """
         Eq 18-20 from Clarke2026: source/sink terms for transitions between branches.
-        Mass leaves branch A and enters B when crossing spinodal point 1, and leaves B and enters C when crossing spinodal point 2. 
+        Mass leaves branch A and enters B when crossing spinodal point 1, and leaves B and enters C when crossing c2*. 
         Ensure Monodirectionaly and mass conservation by making the source for one branch the negative of the other.
         """
         
-        def regularized_delta(c_target):
+        def regularized_delta(c_target, mask):
             sigma=0.01 * self.param.p.prim.c_max # regularization width
-            ker = pybamm.exp(-((c_p - c_target) ** 2) / (2 * sigma ** 2))
+            ker = pybamm.exp(-((c_p - c_target) ** 2) / (2 * sigma ** 2)) * mask
             return ker / pybamm.Integral(ker, c_p)  # normalize: integral = 1
         
         c_p= variables["CCPM positive particle concentration"]
@@ -172,16 +205,13 @@ class CCPMPositiveParticle(FickianDiffusion):
         
         # get transition points
         # Lithiation: A->B at c_sp1, B->C at c_2*
-        c_sp1 = 0.2113 * c_max
-        c2_star = pybamm.Scalar(0.929) * c_max
-        
         # Delithiation: C->B at c_sp2, B->A at c_s1*
-        c_sp2 = 0.7887 * c_max
-        c1_star = 0.071 * c_max
+        c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = self._branch_geometry(c_p)
+       
         
-        g_a = variables["Branch A PDF CCPM"]
-        g_b = variables["Branch B PDF CCPM"]
-        g_c = variables["Branch C PDF CCPM"]
+        g_a = variables["Branch A PDF CCPM Masked"]
+        g_b = variables["Branch B PDF CCPM Masked"]
+        g_c = variables["Branch C PDF CCPM Masked"]
         R_a = variables["CCPM Branch A lithiation rate"]
         R_b = variables["CCPM Branch B lithiation rate"]
         R_c = variables["CCPM Branch C lithiation rate"]
@@ -200,20 +230,21 @@ class CCPMPositiveParticle(FickianDiffusion):
         flux_B_to_A = g_b * pybamm.Maximum(-R_b, 0)
         
         # Source for A is negative of flux leaving A, plus flux entering A from B
-        S_a = flux_B_to_A * regularized_delta(c1_star)
-        S_b = flux_A_to_B * regularized_delta(c_sp1) + flux_C_to_B * regularized_delta(c_sp2)
-        S_c = flux_B_to_C * regularized_delta(c2_star)
+        S_a = flux_B_to_A * regularized_delta(c1_star, mask_a) 
+        S_b = flux_A_to_B * regularized_delta(c_sp1, mask_b) + flux_C_to_B * regularized_delta(c_sp2, mask_b) 
+        S_c = flux_B_to_C * regularized_delta(c2_star, mask_c)
+        
         return S_a, S_b, S_c
     
     def set_boundary_conditions(self, variables):
-        g_a = variables["Branch A PDF CCPM"]
-        g_b = variables["Branch B PDF CCPM"]
-        g_c = variables["Branch C PDF CCPM"]
+        g_a = variables["Branch A PDF CCPM Masked"]
+        g_b = variables["Branch B PDF CCPM Masked"]
+        g_c = variables["Branch C PDF CCPM Masked"]
         zero = pybamm.Scalar(0)
         self.boundary_conditions = {
-            g_a: {"left": (zero, "Neumann"), "right": (zero, "Neumann")},
-            g_b: {"left": (zero, "Neumann"), "right": (zero, "Neumann")},
-            g_c: {"left": (zero, "Neumann"), "right": (zero, "Neumann")},
+            g_a: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
+            g_b: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
+            g_c: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
         }
     
     def set_initial_conditions(self, variables):
@@ -229,17 +260,19 @@ class CCPMPositiveParticle(FickianDiffusion):
         c_init_particle=self.param.p.prim.c_init # r domain
         # collapse to electrode (r-average), then broadcast into concentration domain
         c_init_x = pybamm.r_average(c_init_particle) # positive electrode domain
+        variables.update({ "Initial CCPM particle concentration": c_init_x})
         c_init_cp = pybamm.PrimaryBroadcast(c_init_x, "CCPM positive particle concentration")
 
         # Define a narrow Gaussian to represent the initial state
-        sigma = 0.02 * c_max 
-        initial_distribution = pybamm.exp(-((c_p - c_init_cp) ** 2) / (2 * sigma ** 2))
+        #c_init_cp = 0.01*c_max
+        sigma_a = 0.003 * c_sp1
+        initial_distribution_a = pybamm.exp(-((c_p - c_init_cp) ** 2) / (2 * sigma_a ** 2)) * (c_p <= c_sp1)
         
         # Normalize so the integral over c_p is 1 (Particle Conservation)
         # We start with everything in Branch C for a lithiated cathode
         # or Branch A for a delithiated one.
-        norm = pybamm.Integral(initial_distribution, c_p)
-        initial_pdf = initial_distribution / norm # normalised
+        norm = pybamm.Integral(initial_distribution_a, c_p)
+        initial_pdf = initial_distribution_a / norm # normalised
         
         zero_pdf = 0 * initial_pdf
 
@@ -247,12 +280,6 @@ class CCPMPositiveParticle(FickianDiffusion):
             self.initial_conditions = {
                 g_a: initial_pdf,
                 g_b: zero_pdf,
-                g_c: zero_pdf,
-            }
-        elif self.initial_branch == "B":
-            self.initial_conditions = {
-                g_a: zero_pdf,
-                g_b: initial_pdf,
                 g_c: zero_pdf,
             }
         elif self.initial_branch == "C":
@@ -264,5 +291,5 @@ class CCPMPositiveParticle(FickianDiffusion):
         else:
             raise ValueError(
                 f"Invalid CCPM initial_branch='{self.initial_branch}'. "
-                "Use 'A', 'B', or 'C'."
+                "Use 'A' or 'C'."
             )

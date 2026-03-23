@@ -66,8 +66,8 @@ class CCPMPositiveInterface(BaseKinetics):
         # IMPORTANT. integrate only ovr the range of the branch, otherwise numerical leaks lead to big errors.
         # choose one-sided intervals consistently to avoid double counting at boundaries
         mask_a = (c_p <= c_sp1)
-        mask_b = (c1_star < c_p) * (c_p <= c2_star)
-        mask_c = (c_sp2 < c_p)
+        mask_b = (c1_star <= c_p) * (c_p <= c2_star)
+        mask_c = (c_sp2 <= c_p)
 
         j_a_tot = pybamm.Integral(mask_a * g_a * j_tr_a, c_p)
         j_b_tot = pybamm.Integral(mask_b * g_b * j_tr_b, c_p)
@@ -85,6 +85,9 @@ class CCPMPositiveInterface(BaseKinetics):
         R_a = -beta * j_tr_a
         R_b = -beta * j_tr_b
         R_c = -beta * j_tr_c
+        c_p= variables["CCPM positive particle concentration"]
+        c_max = self.param.p.prim.c_max
+
 
         return j_tr_a, j_tr_b, j_tr_c, j_tot, R_a, R_b, R_c
     

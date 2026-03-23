@@ -21,14 +21,14 @@ class DFN_CCPM(DFN):
         geometry = super().default_geometry
 
         c_max = self.param.p.prim.c_max
-        eps_c = pybamm.Scalar(1e-6) * c_max
+        eps_c = pybamm.Scalar(1e-8) * c_max #TODO debug
 
         c1_star = pybamm.Scalar(0.071) * c_max
         c2_star = pybamm.Scalar(0.929) * c_max
         c_sp1 = pybamm.Scalar(0.2113) * c_max
         c_sp2 = pybamm.Scalar(0.7887) * c_max
 
-        geometry["positive particle concentration"] = {
+        geometry["CCPM positive particle concentration"] = {
             "c_p": {        
                 "min": eps_c,
                 "max": self.param.p.prim.c_max - eps_c, #TODO is this truncation the best strategy?
@@ -39,14 +39,14 @@ class DFN_CCPM(DFN):
     @property
     def default_var_pts(self):
         var_pts = super().default_var_pts
-        var_pts.update({"c_p": 1000})
+        var_pts.update({"c_p": 500})
         return var_pts
 
     @property
     def default_submesh_types(self):
         submesh_types = super().default_submesh_types
         submesh_types.update(
-            {"positive particle concentration": pybamm.Uniform1DSubMesh}
+            {"CCPM positive particle concentration": pybamm.Uniform1DSubMesh}
         )
         return submesh_types
 
@@ -54,7 +54,8 @@ class DFN_CCPM(DFN):
     def default_spatial_methods(self):
         spatial_methods = super().default_spatial_methods
         spatial_methods.update(
-            {"positive particle concentration": pybamm.FiniteVolume()}
+            {"CCPM positive particle concentration": pybamm.FiniteVolume()}
+        )
         return spatial_methods
 
     def set_particle_submodel(self):
