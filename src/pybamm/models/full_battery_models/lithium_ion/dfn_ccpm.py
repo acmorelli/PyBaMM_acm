@@ -3,7 +3,6 @@ import pybamm
 from .dfn import DFN
 from ...submodels.particle.ccpm_positive_particle import CCPMPositiveParticle
 from ...submodels.interface.kinetics.ccpm_positive_interface import CCPMPositiveInterface
-from pybamm.geometry import ccpm_spatial_vars as ccpm_vars
 
 
 class DFN_CCPM(DFN):
@@ -29,51 +28,25 @@ class DFN_CCPM(DFN):
         c_sp1 = pybamm.Scalar(0.2113) * c_max
         c_sp2 = pybamm.Scalar(0.7887) * c_max
 
-        geometry.update(
-            {
-                "CCPM positive particle branch a": {
-                    ccpm_vars.c_a: {
-                        "min": eps_c,
-                        "max": c_sp1,
+        geometry["positive particle concentration"] = {
+            "c_p": {        
+                "min": eps_c,
+                "max": self.param.p.prim.c_max - eps_c, #TODO is this truncation the best strategy?
                     }
-                },
-                "CCPM positive particle branch b": {
-                    ccpm_vars.c_b: {
-                        "min": c1_star,
-                        "max": c2_star,
-                    }
-                },
-                "CCPM positive particle branch c": {
-                    ccpm_vars.c_c: {
-                        "min": c_sp2,
-                        "max": c_max - eps_c,
-                    }
-                },
             }
-        )
         return geometry
 
     @property
     def default_var_pts(self):
         var_pts = super().default_var_pts
-        var_pts.update(
-            {
-                "c_a": 30,
-                "c_b": 40,
-                "c_c": 30,
-            }
-        )
+        var_pts.update({"c_p": 1000})
         return var_pts
 
     @property
     def default_submesh_types(self):
         submesh_types = super().default_submesh_types
         submesh_types.update(
-            {
-                "CCPM positive particle branch a": pybamm.Uniform1DSubMesh,
-                "CCPM positive particle branch b": pybamm.Uniform1DSubMesh,
-                "CCPM positive particle branch c": pybamm.Uniform1DSubMesh,
-            }
+            {"positive particle concentration": pybamm.Uniform1DSubMesh}
         )
         return submesh_types
 
@@ -81,12 +54,7 @@ class DFN_CCPM(DFN):
     def default_spatial_methods(self):
         spatial_methods = super().default_spatial_methods
         spatial_methods.update(
-            {
-                "CCPM positive particle branch a": pybamm.FiniteVolume(),
-                "CCPM positive particle branch b": pybamm.FiniteVolume(),
-                "CCPM positive particle branch c": pybamm.FiniteVolume(),
-            }
-        )
+            {"positive particle concentration": pybamm.FiniteVolume()}
         return spatial_methods
 
     def set_particle_submodel(self):
