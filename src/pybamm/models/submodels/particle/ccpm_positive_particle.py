@@ -166,28 +166,26 @@ class CCPMPositiveParticle(BaseParticle):
         R_c = variables["CCPM Branch C lithiation rate"]
         c_p= variables["CCPM positive particle concentration"]
 
-        # Mask PDFs to their branch domains before computing the flux.
-        # This prevents advective mass from leaking beyond the branch
-        # boundaries; the outgoing flux at each boundary becomes the
-        # natural mass-transfer rate to the neighbouring branch.
+        # Compute flux on the original variables so that PyBaMM can resolve
+        # boundary conditions (BCs are keyed to the Variable, not a derived
+        # expression).  The flux at each boundary edge is therefore naturally
+        # F = R * g_x[boundary_cell], which equals J_x_to_y.
+        # We then mask the *divergence* so that cells outside a branch's domain
+        # receive zero RHS — mass cannot update beyond the branch boundary.
         c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = (
             self._branch_geometry(c_p)
         )
-        g_a_m = g_a * mask_a
-        g_b_m = g_b * mask_b
-        g_c_m = g_c * mask_c
 
         def adv_flux(g, R):
             R_pos = pybamm.Maximum(R, 0)
             R_neg = pybamm.Minimum(R, 0)
             return pybamm.Upwind(g) * R_pos + pybamm.Downwind(g) * R_neg
 
-        F_a = adv_flux(g_a_m, R_a)
-        F_b = adv_flux(g_b_m, R_b)
-        F_c = adv_flux(g_c_m, R_c)
+        F_a = adv_flux(g_a, R_a)
+        F_b = adv_flux(g_b, R_b)
+        F_c = adv_flux(g_c, R_c)
 
-        # Mask the divergence so cells outside a branch's domain
-        # have zero RHS (mass cannot appear beyond the boundary).
+        # Mask divergence: cells outside the branch domain get zero RHS.
         rhs_a = -pybamm.div(F_a) * mask_a
         rhs_b = -pybamm.div(F_b) * mask_b
         rhs_c = -pybamm.div(F_c) * mask_c
