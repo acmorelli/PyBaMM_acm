@@ -1,19 +1,15 @@
 #C:\Users\dottavianomo\programming\PyBaMM_acm\src\pybamm\models\submodels\particle\ccpm_positive_particle.py
-from .fickian_diffusion import FickianDiffusion
+from .base_particle import BaseParticle
 import pybamm
 
 
-class CCPMPositiveParticle(FickianDiffusion):
+class CCPMPositiveParticle(BaseParticle):
     """
-    CCPM-extended Fickian diffusion particle model.
-    
-    Extends the standard Fickian diffusion with CCPM-derived diagnostics:
-    - CCPMstoichiometry (weighted combination of branch stoichiometries)
-    - CCPMopen-circuit potential (weighted by branch fractions)
-    - CCPMexchange current density (weighted by branch fractions)
-    
-    The branch fractions themselves are computed algebraically in the interface kinetics
-    based on the DFN stoichiometry.
+    CCPM positive electrode particle model (Clarke et al. 2026).
+
+    Models hysteresis in LFP cathodes via probability density functions (PDFs)
+    on three branches (A=Li-poor, B=mixed-phase, C=Li-rich) defined on a
+    concentration grid. Replaces Fickian diffusion entirely.
     """
 
     def __init__(
@@ -22,15 +18,13 @@ class CCPMPositiveParticle(FickianDiffusion):
         domain="positive",
         options=None,
         phase="primary",
-        x_average=False,
-        initial_branch="C", #A, B or C
+        initial_branch="C",
     ):
         super().__init__(
             param,
             domain,
             options=options,
             phase=phase,
-            x_average=x_average,
         )
         
         
@@ -76,8 +70,6 @@ class CCPMPositiveParticle(FickianDiffusion):
             "X-averaged Branch C PDF CCPM": pybamm.x_average(g_c),
         }
 
-        # Keep standard Fickian variables to avoid breaking DFN dependency
-        variables.update(super().get_fundamental_variables())
         return variables
     def _branch_geometry(self, c_p):
         c_max = self.param.p.prim.c_max
@@ -95,8 +87,6 @@ class CCPMPositiveParticle(FickianDiffusion):
         return c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c
     
     def get_coupled_variables(self, variables):
-        #TODO: remove inheritance after full integration
-        variables.update(super().get_coupled_variables(variables))
         # Retrieve our PDFs and the concentration grid
         g_a_unmasked = variables["Branch A PDF CCPM"]
         g_b_unmasked = variables["Branch B PDF CCPM"]
@@ -152,6 +142,16 @@ class CCPMPositiveParticle(FickianDiffusion):
             "X-averaged CCPM Total mass": pybamm.x_average(m_tot),
         })
 
+        # Provide standard concentration variable equivalents for downstream
+        # submodels (TotalConcentration, etc.). CCPM has no radial diffusion;
+        # θ_CCPM * c_max is the physically equivalent average concentration.
+        domain, Domain = self.domain_Domain
+        phase_name = self.phase_name
+        c_s_rav_equiv = theta_CCPM * c_max
+        variables.update({
+            f"R-averaged {domain} {phase_name}"
+            "particle concentration [mol.m-3]": c_s_rav_equiv,
+        })
 
         return variables
 
@@ -194,6 +194,7 @@ class CCPMPositiveParticle(FickianDiffusion):
             "Branch A source": S_a,
             "Branch B source": S_b,
             "Branch C source": S_c,
+            "CCPM source mass balance error": pybamm.Integral(S_a + S_b + S_c, c_p),
             })
 
         self.rhs = {
@@ -214,7 +215,7 @@ class CCPMPositiveParticle(FickianDiffusion):
             c_min = eps_c
             c_max_eff = self.param.p.prim.c_max - eps_c
             dc = (c_max_eff - c_min) / (300 - 1)
-            sigma = 2 * dc #regularization width proportional to grid spacing
+            sigma = 1.5 * dc  # regularization width (≈9 cells FWHM)
             ker = pybamm.exp(-((c_p - c_target) ** 2) / (2 * sigma ** 2)) * mask
             return ker / pybamm.Integral(ker, c_p)  # normalize: integral = 1
         

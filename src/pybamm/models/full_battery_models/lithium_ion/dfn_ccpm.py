@@ -3,6 +3,7 @@ import pybamm
 from .dfn import DFN
 from ...submodels.particle.ccpm_positive_particle import CCPMPositiveParticle
 from ...submodels.interface.kinetics.ccpm_positive_interface import CCPMPositiveInterface
+from ...submodels.interface.open_circuit_potential.ccpm_ocp import CCPMOpenCircuitPotential
 
 
 class DFN_CCPM(DFN):
@@ -60,8 +61,21 @@ class DFN_CCPM(DFN):
             domain="positive",
             options=self.options,
             phase="primary",
-            x_average=False,
             initial_branch=self.initial_branch,
+        )
+
+    def set_open_circuit_potential_submodel(self):
+        super().set_open_circuit_potential_submodel()
+        # Replace positive electrode OCP with CCPM-specific version
+        self.submodels["positive primary open-circuit potential"] = (
+            CCPMOpenCircuitPotential(
+                self.param,
+                "positive",
+                "lithium-ion main",
+                self.options,
+                "primary",
+                self.x_average,
+            )
         )
 
     def set_intercalation_kinetics_submodel(self):

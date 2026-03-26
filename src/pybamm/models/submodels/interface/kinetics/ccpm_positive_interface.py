@@ -91,7 +91,12 @@ class CCPMPositiveInterface(BaseKinetics):
 
         return j_tr_a, j_tr_b, j_tr_c, j_tot, R_a, R_b, R_c
     
-    def _get_kinetics(self, j0, ne, eta_r, T, u):
+    def get_coupled_variables(self, variables):
+        domain, Domain = self.domain_Domain
+        reaction_name = self.reaction_name
+        phase_name = self.phase_name
+
+        # Compute CCPM currents and rates directly (no standard j0/eta_r pathway)
         (
             self.j_tr_a,
             self.j_tr_b,
@@ -100,28 +105,62 @@ class CCPMPositiveInterface(BaseKinetics):
             self.R_a,
             self.R_b,
             self.R_c,
-        ) = self._get_ccpm_rates_and_currents(self.variables)
-        
-        #Butler Voler from butler_volmer.py:
-        Feta_RT = self.param.F * eta_r / (self.param.R * T)
-        j_bv= 2 * u * j0 * pybamm.sinh(ne * 0.5 * Feta_RT)
+        ) = self._get_ccpm_rates_and_currents(variables)
 
-        return self.j_tot 
-        #return j_bv #TODO not coupling CCPM
+        # Get surface potential difference for diagnostic eta_r
+        delta_phi = variables[
+            f"{Domain} electrode surface potential difference [V]"
+        ]
+        if isinstance(delta_phi, pybamm.Broadcast):
+            delta_phi = delta_phi.orphans[0]
 
-                                                               
-    def get_coupled_variables(self, variables):
-        self.variables = variables #should call _get_kinetics
-        variables = super().get_coupled_variables(variables)
-        a_s_p = variables["Positive electrode surface area to volume ratio [m-1]"]
+        # Read OCP produced by CCPMOpenCircuitPotential submodel
+        ocp = variables[
+            f"{Domain} electrode {reaction_name}open-circuit potential [V]"
+        ]
+        if isinstance(ocp, pybamm.Broadcast):
+            if delta_phi.domains.get("secondary") == ["current collector"]:
+                ocp = ocp.orphans[0]
+
+        # Diagnostic overpotential (not used in CCPM kinetics — built into sinh)
+        eta_r = delta_phi - ocp
+
+        # CCPM doesn't use standard exchange current density
+        j0 = pybamm.Scalar(0)
+
+        # No SEI film overpotential
+        eta_sei = pybamm.Scalar(0)
+
+        # Average total interfacial current density (for SEI resistance estimate)
+        j_tot_av, a_j_tot_av = (
+            self._get_average_total_interfacial_current_density(variables)
+        )
+
+        # Standard formatting helpers from BaseInterface
+        variables.update(
+            self._get_standard_interfacial_current_variables(self.j_tot)
+        )
+        variables.update(
+            self._get_standard_total_interfacial_current_variables(
+                j_tot_av, a_j_tot_av
+            )
+        )
+        variables.update(self._get_standard_exchange_current_variables(j0))
+        variables.update(self._get_standard_overpotential_variables(eta_r))
+        variables.update(
+            self._get_standard_volumetric_current_density_variables(variables)
+        )
+        variables.update(
+            self._get_standard_sei_film_overpotential_variables(eta_sei)
+        )
+
+        # CCPM-specific variables
+        a_s_p = variables[
+            f"{Domain} electrode {phase_name}"
+            "surface area to volume ratio [m-1]"
+        ]
         j_vol = a_s_p * self.j_tot
         variables.update({
-            # Standard PyBaMM expects this variable for the DFN:
-            "Positive electrode interfacial current density [A.m-2]": self.j_tot,
-            
-            "Positive electrode volumetric interfacial current density [A.m-3]": j_vol,
-                
-            # CCPM
             "CCPM Branch A interfacial current density [A.m-2]": self.j_tr_a,
             "CCPM Branch B interfacial current density [A.m-2]": self.j_tr_b,
             "CCPM Branch C interfacial current density [A.m-2]": self.j_tr_c,
@@ -134,5 +173,5 @@ class CCPMPositiveInterface(BaseKinetics):
             "X-averaged CCPM Branch B lithiation rate": pybamm.x_average(self.R_b),
             "X-averaged CCPM Branch C lithiation rate": pybamm.x_average(self.R_c),
         })
-        
+
         return variables

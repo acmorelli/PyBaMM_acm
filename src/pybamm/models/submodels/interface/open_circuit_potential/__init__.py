@@ -3,6 +3,7 @@ from .base_hysteresis_ocp import BaseHysteresisOpenCircuitPotential
 from .single_ocp import SingleOpenCircuitPotential
 from .current_sigmoid_ocp import CurrentSigmoidOpenCircuitPotential
 from .msmr_ocp import MSMROpenCircuitPotential
+from .ccpm_ocp import CCPMOpenCircuitPotential
 from .one_state_differential_capacity_hysteresis_ocp import (
     OneStateDifferentialCapacityHysteresisOpenCircuitPotential,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "current_sigmoid_ocp",
     "msmr_ocp",
     "single_ocp",
+    "ccpm_ocp",
     "one_state_differential_capacity_hysteresis_ocp",
     "one_state_hysteresis_ocp",
 ]
