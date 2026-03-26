@@ -23,11 +23,6 @@ class DFN_CCPM(DFN):
         c_max = self.param.p.prim.c_max
         eps_c = pybamm.Scalar(1e-8) * c_max #TODO debug
 
-        c1_star = pybamm.Scalar(0.071) * c_max
-        c2_star = pybamm.Scalar(0.929) * c_max
-        c_sp1 = pybamm.Scalar(0.2113) * c_max
-        c_sp2 = pybamm.Scalar(0.7887) * c_max
-
         geometry["CCPM positive particle concentration"] = {
             "c_p": {        
                 "min": eps_c,
@@ -39,7 +34,7 @@ class DFN_CCPM(DFN):
     @property
     def default_var_pts(self):
         var_pts = super().default_var_pts
-        var_pts.update({"c_p": 500})
+        var_pts.update({"c_p": 300})
         return var_pts
 
     @property

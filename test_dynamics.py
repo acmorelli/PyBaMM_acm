@@ -30,23 +30,24 @@ def sign_status(a):
 parameter_values = pybamm.ParameterValues("Prada2013")
 model = DFN_CCPM(initial_branch="A")
 
-parameter_values.update({
-    "Current function [A]": 0.077, # discharge. Prada2013 starts with approx 90% SOC (delithiated)
-})
+experiment = pybamm.Experiment([
+    "Discharge at C/20 until 3.25 V",    #3.25V
+])
 
 sim = pybamm.Simulation(
     model,
     parameter_values=parameter_values,
+    experiment=experiment,
     solver=pybamm.CasadiSolver(mode="safe"),
 )
 
-# Short time window first
-t1 = np.linspace(0, 2, 10, endpoint=False)  
-t2 = np.linspace(2, 50, 5)                 
-t_eval = np.concatenate([t1, t2])
-
 print("solving...")
-solution = sim.solve(t_eval=t_eval)
+solution = sim.solve()
+# Save the entire simulation (includes model, params, and solution)
+sim.save("my_sim_result_Sbalance_c20.pkl")
+
+
+
 print("Solved.\n")
 
 
