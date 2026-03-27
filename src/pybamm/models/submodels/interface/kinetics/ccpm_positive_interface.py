@@ -91,11 +91,22 @@ class CCPMPositiveInterface(BaseKinetics):
         mask_a = (c_p <= c_sp1)
         mask_b = (c1_star <= c_p) * (c_p <= c2_star)
         mask_c = (c_sp2 <= c_p)
-        R_a = -beta * j_tr_a * mask_a
+
+        # Enforce R_a = 0 at c_min (left domain edge) for zero-flux BC.
+        # PyBaMM extrapolates R to edges via: R_edge[0] = 1.5*R[0] - 0.5*R[1]
+        # So R must be 0 at BOTH node[0] and node[1] for R_edge[0] = 0.
+        # Ramp: 0 at nodes 0,1 → 0.5 at node 2 → 1 at node 3+
+        # This spreads the transition over 2 cells for smoother gradients.
+        c_min = pybamm.Scalar(1e-8) * self.param.p.prim.c_max
+        dc = (c_p_max - c_min) / 300  # uniform cell width = domain / npts
+        ramp_a = pybamm.smooth_min(
+            pybamm.smooth_max((c_p - c_min - 3 * dc / 2) / (2 * dc), 0, 100),
+            1, 100,
+        )
+
+        R_a = -beta * j_tr_a * mask_a * ramp_a
         R_b = -beta * j_tr_b *mask_b
         R_c = -beta * j_tr_c *mask_c
-
-
 
         return j_tr_a, j_tr_b, j_tr_c, j_tot, R_a, R_b, R_c
     

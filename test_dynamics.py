@@ -29,10 +29,10 @@ def sign_status(a):
 # Model / parameters
 # -----------------------------
 parameter_values = pybamm.ParameterValues("Prada2013")
-model = DFN_CCPM(initial_branch="A", source_method="gaussian")
+model = DFN_CCPM(initial_branch="A", source_method="flux_form")
 
 experiment = pybamm.Experiment([
-    "Discharge at C/2 for 5s",    #3.25V
+    "Discharge at C/30 for 5s",    #3.25V
 ])
 
 sim = pybamm.Simulation(
@@ -45,7 +45,7 @@ sim = pybamm.Simulation(
 print("solving...")
 solution = sim.solve()
 # Save the entire simulation (includes model, params, and solution)
-sim.save("C2_5s_gaussian.pkl")
+sim.save("C30_5s_gaussian.pkl")
 
 
 

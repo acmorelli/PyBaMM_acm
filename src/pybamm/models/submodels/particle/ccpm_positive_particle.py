@@ -153,26 +153,11 @@ class CCPMPositiveParticle(BaseParticle):
 
         #sources
         S_a, S_b, S_c, J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B = self._get_transition_sources(variables, F_a, F_b, F_c) # changed the balance
-        c_min=1e-8*self.param.p.prim.c_max   
-        # Physical wall corrections
-        # Left wall of A: ghost leaks g_0 * R when R > 0
-        g_a_left = pybamm.EvaluateAt(g_a, c_min)
-        R_a_left = pybamm.EvaluateAt(R_a, c_min)
-        # Ghost leaks g_0*|R| regardless of R sign (both upwind and downwind)
-        leak_a_left = g_a_left * (
-            pybamm.smooth_max(R_a_left, 0, 100)
-            + pybamm.smooth_max(-R_a_left, 0, 100)
-        )
 
-        # Domain lengths for uniform spreading
-        L_a = pybamm.Integral(mask_a, c_p)
-        L_c = pybamm.Integral(mask_c, c_p)
-
-        # Wall correction sources (uniform over branch)
-        wall_a = (leak_a_left / L_a) * mask_a
-
-        # Corrected RHS
-        rhs_a = -pybamm.div(F_a) * mask_a + wall_a
+        # R_a is now enforced to be 0 at c_min via the ramp in the interface
+        # kinetics, so the ghost-cell flux at the left wall is zero and no
+        # wall correction is needed.
+        rhs_a = -pybamm.div(F_a) * mask_a
         rhs_b = -pybamm.div(F_b) * mask_b     
         rhs_c = -pybamm.div(F_c) * mask_c
         # track rhs for debug
@@ -236,7 +221,7 @@ class CCPMPositiveParticle(BaseParticle):
             eps_c = pybamm.Scalar(1e-8) * self.param.p.prim.c_max
             c_min = eps_c
             c_max_eff = self.param.p.prim.c_max - eps_c
-            dc = (c_max_eff - c_min) / (300 - 1)
+            dc = (c_max_eff - c_min) / 300  # npts=300 cells, 301 edges
             sigma = 1.5 * dc
             ker = pybamm.exp(-((c_p - c_target) ** 2) / (2 * sigma ** 2)) * mask
             return ker / pybamm.Integral(ker, c_p)
