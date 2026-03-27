@@ -73,7 +73,7 @@ R_a = arr(solution, "CCPM Branch A lithiation rate")
 R_b = arr(solution, "CCPM Branch B lithiation rate")
 R_c = arr(solution, "CCPM Branch C lithiation rate")
 
-j_ccpm = arr(solution, "CCPM Positive electrode interfacial current density [A.m-2]")
+j_ccpm = arr(solution, "CCPM Branch A interfacial current density [A.m-2]")
 
 #Mdot_rhs= arr(solution, "Branch A PDF CCPM RHS Integrated on c_p")
 #Mdot_fd= np.diff(m_a) / np.diff(time)
@@ -188,7 +188,7 @@ fig.update_xaxes(title_text="Time [s]", row=4, col=1)
 fig.update_yaxes(title_text="X-averaged branch mass", row=1, col=1)
 fig.update_yaxes(title_text="X-averaged CCPM stoichiometry", row=2, col=1)
 fig.update_yaxes(title_text="Voltage [V]", row=3, col=1)
-fig.update_yaxes(title_text="Interfacial current density [A.m-2]", row=4, col=1)
+fig.update_yaxes(title_text="j_tr_a Interfacial current density [A.m-2]", row=4, col=1)
 
 fig.update_layout(
     height=1000,
