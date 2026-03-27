@@ -96,85 +96,46 @@ class CCPMPositiveParticle(BaseParticle):
         g_b= variables["Branch B PDF CCPM"]
         g_c= variables["Branch C PDF CCPM"]
         c_p = variables["CCPM positive particle concentration"]
-        eps=1e-8*self.param.p.prim.c_max 
-        c_max = self.param.p.prim.c_max -eps
 
-        # mask density functions
-        c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = self._branch_geometry(c_p)
-        #g_a = g_a_unmasked * mask_a
-        #g_b = g_b_unmasked * mask_b
-        #g_c = g_c_unmasked * mask_c
-        # 2. Calculate the average stoichiometry for the CCPM
-        # This is the integral of (c * total_PDF) / c_max
-        # This replaces the old 'theta_a_ref' logic with real PDF physics
+        eps=1e-8*self.param.p.prim.c_max
+        c_max = self.param.p.prim.c_max - eps
         theta_CCPM= pybamm.Integral((g_a + g_b + g_c) * (c_p / c_max), c_p)
 
-        
         # mass per branch
         m_a = pybamm.Integral(g_a, c_p)
         m_b = pybamm.Integral(g_b, c_p)
         m_c = pybamm.Integral(g_c, c_p)
         m_tot = m_a + m_b + m_c
-        
-        # include rhs_c
-        #cbar_c = pybamm.Integral(g_c * c_p, c_p) / pybamm.Maximum(m_c, 1e-16) # average concentration in branch C
-        #m_a_raw = pybamm.Integral(variables["Branch A PDF CCPM"], c_p)
-        #m_b_raw = pybamm.Integral(variables["Branch B PDF CCPM"], c_p)
-        #m_c_raw = pybamm.Integral(variables["Branch C PDF CCPM"], c_p)
-        #m_tot_raw = m_a_raw + m_b_raw + m_c_raw
+
+        # Early partial update: stoichiometry and masses are needed by the OCP
+        # submodel and do NOT depend on lithiation rates. By updating variables
+        # here (before accessing R_a), the framework's KeyError-retry loop can
+        # resolve the circular dependency: Particle → OCP → Interface → Particle.
+        domain, Domain = self.domain_Domain
+        phase_name = self.phase_name
         variables.update({
-            #"CCPM Unmasked Mass Branch A": m_a_raw,
-            #"CCPM Unmasked Mass Branch B": m_b_raw,
-            #"CCPM Unmasked Mass Branch C": m_c_raw,
-            #"CCPM Unmasked Total Mass": m_tot_raw,
-            "Branch A PDF CCPM Masked": g_a,
-            "Branch B PDF CCPM Masked": g_b,
-            "Branch C PDF CCPM Masked": g_c,
+            "Positive CCPM stoichiometry": theta_CCPM,
+            "X-averaged positive CCPM stoichiometry": pybamm.x_average(theta_CCPM),
             "CCPM Branch A mass": m_a,
             "CCPM Branch B mass": m_b,
             "CCPM Branch C mass": m_c,
             "CCPM Total mass": m_tot,
-            "Positive CCPM stoichiometry": theta_CCPM,
-            "X-averaged positive CCPM stoichiometry": pybamm.x_average(theta_CCPM),
-            "CCPM Total PDF sum": g_a + g_b + g_c, # Should integrate to 1,
-            #"CCPM Branch C mean concentration": cbar_c,
-            "X-averaged Branch A PDF CCPM": pybamm.x_average(g_a),
-            "X-averaged Branch B PDF CCPM": pybamm.x_average(g_b),
-            "X-averaged Branch C PDF CCPM": pybamm.x_average(g_c),
             "X-averaged CCPM Branch A mass": pybamm.x_average(m_a),
             "X-averaged CCPM Branch B mass": pybamm.x_average(m_b),
             "X-averaged CCPM Branch C mass": pybamm.x_average(m_c),
             "X-averaged CCPM Total mass": pybamm.x_average(m_tot),
-        })
-
-        # Provide standard concentration variable equivalents for downstream
-        # submodels (TotalConcentration, etc.). CCPM has no radial diffusion;
-        # θ_CCPM * c_max is the physically equivalent average concentration.
-        domain, Domain = self.domain_Domain
-        phase_name = self.phase_name
-        c_s_rav_equiv = theta_CCPM * c_max
-        variables.update({
             f"R-averaged {domain} {phase_name}"
-            "particle concentration [mol.m-3]": c_s_rav_equiv,
+            "particle concentration [mol.m-3]": theta_CCPM * c_max,
         })
 
-        return variables
-
-    def set_rhs(self, variables):
-        g_a = variables["Branch A PDF CCPM"]
-        g_b = variables["Branch B PDF CCPM"]
-        g_c = variables["Branch C PDF CCPM"]
+        # The remainder depends on lithiation rates (from the interface submodel).
+        # On the first build pass R_a may not yet be present; the KeyError will be
+        # caught by build_coupled_variables and this submodel retried after the
+        # interface submodel has run.
         R_a = variables["CCPM Branch A lithiation rate"]
         R_b = variables["CCPM Branch B lithiation rate"]
         R_c = variables["CCPM Branch C lithiation rate"]
-        c_p= variables["CCPM positive particle concentration"]
-
-        # Compute flux on the original variables so that PyBaMM can resolve
-        # boundary conditions (BCs are keyed to the Variable, not a derived
-        # expression).  The flux at each boundary edge is therefore naturally
-        # F = R * g_x[boundary_cell], which equals J_x_to_y.
-        # We then mask the *divergence* so that cells outside a branch's domain
-        # receive zero RHS — mass cannot update beyond the branch boundary.
+        
         c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = (
             self._branch_geometry(c_p)
         )
@@ -195,30 +156,50 @@ class CCPMPositiveParticle(BaseParticle):
         rhs_b = -pybamm.div(F_b) * mask_b
         rhs_c = -pybamm.div(F_c) * mask_c
         # track rhs for debug
-        rhs_int = pybamm.Integral(rhs_a, c_p)
+        rhs_int_a = pybamm.Integral(rhs_a, c_p)
+        rhs_int_b = pybamm.Integral(rhs_b, c_p)
+        rhs_int_c = pybamm.Integral(rhs_c, c_p)
 
         #sources
-        
         S_a, S_b, S_c, J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B = self._get_transition_sources(variables, F_a, F_b, F_c) # changed the balance
         variables.update({
-            "Branch A PDF CCPM RHS": rhs_int,
+            "Branch A RHS": rhs_a,
+            "Branch B RHS": rhs_b,
+            "Branch C RHS": rhs_c,
+            
+            "Branch A PDF CCPM RHS Integrated on c_p": rhs_int_a,
+            "Branch B PDF CCPM RHS Integrated on c_p": rhs_int_b,
+            "Branch C PDF CCPM RHS Integrated on c_p": rhs_int_c,
+
             "Branch A CCPM Flux": F_a,
             "Branch B CCPM Flux": F_b,
             "Branch C CCPM Flux": F_c,
+            
             "Branch A to B scalar flux": J_A_to_B,
             "Branch B to A scalar flux": J_B_to_A,
             "Branch B to C scalar flux": J_B_to_C,
             "Branch C to B scalar flux": J_C_to_B,
+            
             "Branch A source": S_a,
             "Branch B source": S_b,
             "Branch C source": S_c,
             "CCPM source mass balance error": pybamm.Integral(S_a + S_b + S_c, c_p),
-            })
+
+
+            "CCPM Total PDF sum": g_a + g_b + g_c, # Should integrate to 1,
+            "X-averaged Branch A PDF CCPM": pybamm.x_average(g_a),
+            "X-averaged Branch B PDF CCPM": pybamm.x_average(g_b),
+            "X-averaged Branch C PDF CCPM": pybamm.x_average(g_c),
+        })
+
+        return variables
+
+    def set_rhs(self, variables):
 
         self.rhs = {
-            g_a: rhs_a + S_a,
-            g_b: rhs_b + S_b,
-            g_c: rhs_c + S_c,
+            variables["Branch A PDF CCPM"]: variables["Branch A RHS"] + variables["Branch A source"],
+            variables["Branch B PDF CCPM"]: variables["Branch B RHS"] + variables["Branch B source"],
+            variables["Branch C PDF CCPM"]: variables["Branch C RHS"] + variables["Branch C source"],
         }
         
     def _get_transition_sources(self, variables, F_a, F_b, F_c):
@@ -258,7 +239,7 @@ class CCPMPositiveParticle(BaseParticle):
         dC_c2  = regularized_delta(c2_star, mask_c) # B->C deposit into C at c2*
         dB_sp2 = regularized_delta(c_sp2, mask_b)   # C->B deposit into B at c_sp2
         if self.source_method == "flux_form":
-            # --- Flux-form scalar transfer magnitudes ---
+            # compute scalar fluxes at transition points
             # Evaluate g and R at the transition point (cell center nearest),
             # forming the upwind flux g * max(R, 0). Matches advection exactly.
             J_A_to_B = (
@@ -335,10 +316,10 @@ class CCPMPositiveParticle(BaseParticle):
         # discrete trapezoid mean equals c_init exactly (theta=0.0038, Prada2013).
         # Analytical lam=(c_init-c_min)/2 gives discrete mean ~theta=0.0047 due
         # to sub-grid resolution (c_init ≈ 1.1*dc). Corrected: lam=27.7, dc=76.3.
-        lam = pybamm.Scalar(1.214e-3) * c_max
+        lam = pybamm.Scalar(1.3681e-3) * c_max
         shifted = c_p - c_min_domain
         initial_distribution_a = (
-            shifted * pybamm.exp(-shifted / lam) * (c_p <= c_sp1)
+            shifted *2* pybamm.exp(-shifted / lam) * (c_p <= c_sp1)
         )
         
         # Normalize so the integral over c_p is 1 (Particle Conservation)
