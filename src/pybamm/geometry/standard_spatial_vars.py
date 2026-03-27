@@ -222,7 +222,7 @@ R_p_edge = pybamm.SpatialVariableEdge(
     coord_sys="cartesian",
 )
 
-# new concentration domain
+# new concentration domain (legacy single-domain, kept for backwards compatibility)
 c_p = pybamm.SpatialVariable(
     "c_p",
     domain=["CCPM positive particle concentration"],
@@ -236,6 +236,68 @@ c_p = pybamm.SpatialVariable(
 c_p_edge = pybamm.SpatialVariableEdge(
     "c_p",
     domain=["CCPM positive particle concentration"],
+    auxiliary_domains={
+        "secondary": "positive electrode",
+        "tertiary": "current collector",
+    },
+    coord_sys="cartesian",
+)
+
+# Three-subdomain concentration variables (Clarke 2026 eq 62)
+# Domain names contain 'particle' so PrimaryBroadcast from electrode domain works.
+c_p_a = pybamm.SpatialVariable(
+    "c_p_a",
+    domain=["CCPM positive particle branch A"],
+    auxiliary_domains={
+        "secondary": "positive electrode",
+        "tertiary": "current collector",
+    },
+    coord_sys="cartesian",
+)
+
+c_p_a_edge = pybamm.SpatialVariableEdge(
+    "c_p_a",
+    domain=["CCPM positive particle branch A"],
+    auxiliary_domains={
+        "secondary": "positive electrode",
+        "tertiary": "current collector",
+    },
+    coord_sys="cartesian",
+)
+
+c_p_b = pybamm.SpatialVariable(
+    "c_p_b",
+    domain=["CCPM positive particle branch B"],
+    auxiliary_domains={
+        "secondary": "positive electrode",
+        "tertiary": "current collector",
+    },
+    coord_sys="cartesian",
+)
+
+c_p_b_edge = pybamm.SpatialVariableEdge(
+    "c_p_b",
+    domain=["CCPM positive particle branch B"],
+    auxiliary_domains={
+        "secondary": "positive electrode",
+        "tertiary": "current collector",
+    },
+    coord_sys="cartesian",
+)
+
+c_p_c = pybamm.SpatialVariable(
+    "c_p_c",
+    domain=["CCPM positive particle branch C"],
+    auxiliary_domains={
+        "secondary": "positive electrode",
+        "tertiary": "current collector",
+    },
+    coord_sys="cartesian",
+)
+
+c_p_c_edge = pybamm.SpatialVariableEdge(
+    "c_p_c",
+    domain=["CCPM positive particle branch C"],
     auxiliary_domains={
         "secondary": "positive electrode",
         "tertiary": "current collector",

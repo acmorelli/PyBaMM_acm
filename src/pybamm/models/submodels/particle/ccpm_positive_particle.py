@@ -8,8 +8,13 @@ class CCPMPositiveParticle(BaseParticle):
     CCPM positive electrode particle model (Clarke et al. 2026).
 
     Models hysteresis in LFP cathodes via probability density functions (PDFs)
-    on three branches (A=Li-poor, B=mixed-phase, C=Li-rich) defined on a
-    concentration grid. Replaces Fickian diffusion entirely.
+    on three branches (A=Li-poor, B=mixed-phase, C=Li-rich), each living on
+    its own compact concentration subdomain (Clarke 2026, eq 62):
+      Branch A: [0, c_sp1]         (Li-poor spinodal limit)
+      Branch B: [c1_star, c2_star] (mixed-phase)
+      Branch C: [c_sp2, c_max]     (Li-rich spinodal limit)
+
+    Each PDF is discretised on a separate FV mesh; there is no masking.
     """
 
     def __init__(
@@ -20,6 +25,7 @@ class CCPMPositiveParticle(BaseParticle):
         phase="primary",
         initial_branch="C",
         source_method="flux_form",
+        n_pts=(63, 258, 63),
     ):
         super().__init__(
             param,
@@ -27,114 +33,91 @@ class CCPMPositiveParticle(BaseParticle):
             options=options,
             phase=phase,
         )
-        
-        
-        self.c_p_space = pybamm.standard_spatial_vars.c_p
+        # Three subdomain spatial variables
+        self.c_p_a = pybamm.standard_spatial_vars.c_p_a
+        self.c_p_b = pybamm.standard_spatial_vars.c_p_b
+        self.c_p_c = pybamm.standard_spatial_vars.c_p_c
+
         self.initial_branch = initial_branch.upper()
         self.source_method = source_method
-        
+        # Number of FV cells per branch — must match dfn_ccpm default_var_pts
+        self.n_pts_a, self.n_pts_b, self.n_pts_c = n_pts
+
     def get_fundamental_variables(self):
-        # 1. Define the 3 PDFs as state variables (Differential Variables)
-        # Primary domain: the concentration grid 'c'
-        # Secondary domain: the electrode position 'x'
+        # Each PDF lives on its own concentration subdomain
         g_a = pybamm.Variable(
             "Branch A PDF CCPM",
-        domains={
-            "primary": "CCPM positive particle concentration",
-            "secondary": "positive electrode",
-            "tertiary": "current collector"
-        }
+            domains={
+                "primary": "CCPM positive particle branch A",
+                "secondary": "positive electrode",
+                "tertiary": "current collector",
+            },
         )
         g_b = pybamm.Variable(
             "Branch B PDF CCPM",
-        domains={
-            "primary": "CCPM positive particle concentration",
-            "secondary": "positive electrode",
-            "tertiary": "current collector"
-        }
+            domains={
+                "primary": "CCPM positive particle branch B",
+                "secondary": "positive electrode",
+                "tertiary": "current collector",
+            },
         )
         g_c = pybamm.Variable(
             "Branch C PDF CCPM",
-        domains={
-            "primary": "CCPM positive particle concentration",
-            "secondary": "positive electrode",
-            "tertiary": "current collector"
-    }
+            domains={
+                "primary": "CCPM positive particle branch C",
+                "secondary": "positive electrode",
+                "tertiary": "current collector",
+            },
         )
 
         variables = {
             "Branch A PDF CCPM": g_a,
             "Branch B PDF CCPM": g_b,
             "Branch C PDF CCPM": g_c,
-            "CCPM positive particle concentration": self.c_p_space,
             "X-averaged Branch A PDF CCPM": pybamm.x_average(g_a),
             "X-averaged Branch B PDF CCPM": pybamm.x_average(g_b),
             "X-averaged Branch C PDF CCPM": pybamm.x_average(g_c),
         }
-
         return variables
-    def _branch_geometry(self, c_p):
-        c_max = self.param.p.prim.c_max
 
+    def _branch_boundaries(self):
+        """Return the four scalar branch-boundary constants."""
+        c_max = self.param.p.prim.c_max
         c1_star = pybamm.Scalar(0.0710) * c_max
         c_sp1   = pybamm.Scalar(0.2113) * c_max
         c_sp2   = pybamm.Scalar(0.7887) * c_max
         c2_star = pybamm.Scalar(0.9290) * c_max
+        return c1_star, c_sp1, c_sp2, c2_star
 
-        # same boolean-mask style you already used
-        mask_a = (c_p <= c_sp1)
-        mask_b = (c_p >= c1_star) * (c_p <= c2_star)
-        mask_c = (c_p >= c_sp2)
-
-        return c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c
-    
     def get_coupled_variables(self, variables):
-        # Retrieve our PDFs and the concentration grid
-        g_a_unmasked = variables["Branch A PDF CCPM"]
-        g_b_unmasked = variables["Branch B PDF CCPM"]
-        g_c_unmasked = variables["Branch C PDF CCPM"]
-        c_p = variables["CCPM positive particle concentration"]
+        g_a = variables["Branch A PDF CCPM"]
+        g_b = variables["Branch B PDF CCPM"]
+        g_c = variables["Branch C PDF CCPM"]
+        c_p_a = self.c_p_a
+        c_p_b = self.c_p_b
+        c_p_c = self.c_p_c
         c_max = self.param.p.prim.c_max
 
-        # mask density functions
-        c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = self._branch_geometry(c_p)
-        g_a = g_a_unmasked * mask_a
-        g_b = g_b_unmasked * mask_b
-        g_c = g_c_unmasked * mask_c
-        # 2. Calculate the average stoichiometry for the CCPM
-        # This is the integral of (c * total_PDF) / c_max
-        # This replaces the old 'theta_a_ref' logic with real PDF physics
-        theta_CCPM= pybamm.Integral((g_a + g_b + g_c) * (c_p / c_max), c_p)
+        # Average stoichiometry: sum of integrals over each branch domain
+        theta_CCPM = (
+            pybamm.Integral(g_a * (c_p_a / c_max), c_p_a)
+            + pybamm.Integral(g_b * (c_p_b / c_max), c_p_b)
+            + pybamm.Integral(g_c * (c_p_c / c_max), c_p_c)
+        )
 
-        
-        # mass per branch
-        m_a = pybamm.Integral(g_a, c_p)
-        m_b = pybamm.Integral(g_b, c_p)
-        m_c = pybamm.Integral(g_c, c_p)
+        # Branch masses
+        m_a = pybamm.Integral(g_a, c_p_a)
+        m_b = pybamm.Integral(g_b, c_p_b)
+        m_c = pybamm.Integral(g_c, c_p_c)
         m_tot = m_a + m_b + m_c
-        
-        # include rhs_c
-        cbar_c = pybamm.Integral(g_c * c_p, c_p) / pybamm.Maximum(m_c, 1e-16) # average concentration in branch C
-        m_a_raw = pybamm.Integral(variables["Branch A PDF CCPM"], c_p)
-        m_b_raw = pybamm.Integral(variables["Branch B PDF CCPM"], c_p)
-        m_c_raw = pybamm.Integral(variables["Branch C PDF CCPM"], c_p)
-        m_tot_raw = m_a_raw + m_b_raw + m_c_raw
+
         variables.update({
-            "CCPM Unmasked Mass Branch A": m_a_raw,
-            "CCPM Unmasked Mass Branch B": m_b_raw,
-            "CCPM Unmasked Mass Branch C": m_c_raw,
-            "CCPM Unmasked Total Mass": m_tot_raw,
-            "Branch A PDF CCPM Masked": g_a,
-            "Branch B PDF CCPM Masked": g_b,
-            "Branch C PDF CCPM Masked": g_c,
             "CCPM Branch A mass": m_a,
             "CCPM Branch B mass": m_b,
             "CCPM Branch C mass": m_c,
             "CCPM Total mass": m_tot,
             "Positive CCPM stoichiometry": theta_CCPM,
             "X-averaged positive CCPM stoichiometry": pybamm.x_average(theta_CCPM),
-            "CCPM Total PDF sum": g_a + g_b + g_c, # Should integrate to 1,
-            "CCPM Branch C mean concentration": cbar_c,
             "X-averaged Branch A PDF CCPM": pybamm.x_average(g_a),
             "X-averaged Branch B PDF CCPM": pybamm.x_average(g_b),
             "X-averaged Branch C PDF CCPM": pybamm.x_average(g_c),
@@ -144,15 +127,12 @@ class CCPMPositiveParticle(BaseParticle):
             "X-averaged CCPM Total mass": pybamm.x_average(m_tot),
         })
 
-        # Provide standard concentration variable equivalents for downstream
-        # submodels (TotalConcentration, etc.). CCPM has no radial diffusion;
-        # θ_CCPM * c_max is the physically equivalent average concentration.
+        # Standard concentration equivalent for downstream submodels
         domain, Domain = self.domain_Domain
         phase_name = self.phase_name
-        c_s_rav_equiv = theta_CCPM * c_max
         variables.update({
             f"R-averaged {domain} {phase_name}"
-            "particle concentration [mol.m-3]": c_s_rav_equiv,
+            "particle concentration [mol.m-3]": theta_CCPM * c_max,
         })
 
         return variables
@@ -164,17 +144,6 @@ class CCPMPositiveParticle(BaseParticle):
         R_a = variables["CCPM Branch A lithiation rate"]
         R_b = variables["CCPM Branch B lithiation rate"]
         R_c = variables["CCPM Branch C lithiation rate"]
-        c_p= variables["CCPM positive particle concentration"]
-
-        # Compute flux on the original variables so that PyBaMM can resolve
-        # boundary conditions (BCs are keyed to the Variable, not a derived
-        # expression).  The flux at each boundary edge is therefore naturally
-        # F = R * g_x[boundary_cell], which equals J_x_to_y.
-        # We then mask the *divergence* so that cells outside a branch's domain
-        # receive zero RHS — mass cannot update beyond the branch boundary.
-        c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = (
-            self._branch_geometry(c_p)
-        )
 
         def adv_flux(g, R):
             R_pos = pybamm.Maximum(R, 0)
@@ -185,18 +154,26 @@ class CCPMPositiveParticle(BaseParticle):
         F_b = adv_flux(g_b, R_b)
         F_c = adv_flux(g_c, R_c)
 
-        # Mask divergence: cells outside the branch domain get zero RHS.
-        rhs_a = -pybamm.div(F_a) * mask_a
-        rhs_b = -pybamm.div(F_b) * mask_b
-        rhs_c = -pybamm.div(F_c) * mask_c
-        # track rhs for debug
-        rhs_int = pybamm.Integral(rhs_a, c_p)
+        # Clean divergences — no masking needed with separate subdomains
+        rhs_a = -pybamm.div(F_a)
+        rhs_b = -pybamm.div(F_b)
+        rhs_c = -pybamm.div(F_c)
 
-        #sources
-        
-        S_a, S_b, S_c, J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B = self._get_transition_sources(variables, F_a, F_b, F_c) # changed the balance
+        # Compute transition sources and wall corrections together
+        # so they share the same R_edge and g_cell values (FV-consistent).
+        (S_a, S_b, S_c,
+         S_wall_a, S_wall_b, S_wall_c,
+         J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B
+        ) = self._get_sources_and_corrections(variables)
+
+        # Mass-balance error: scalar sum of source integrals across all domains
+        source_error = (
+            pybamm.Integral(S_a, self.c_p_a)
+            + pybamm.Integral(S_b, self.c_p_b)
+            + pybamm.Integral(S_c, self.c_p_c)
+        )
+
         variables.update({
-            "Branch A PDF CCPM RHS": rhs_int,
             "Branch A CCPM Flux": F_a,
             "Branch B CCPM Flux": F_b,
             "Branch C CCPM Flux": F_c,
@@ -207,41 +184,48 @@ class CCPMPositiveParticle(BaseParticle):
             "Branch A source": S_a,
             "Branch B source": S_b,
             "Branch C source": S_c,
-            "CCPM source mass balance error": pybamm.Integral(S_a + S_b + S_c, c_p),
-            })
+            "Branch A wall correction": S_wall_a,
+            "Branch B wall correction": S_wall_b,
+            "Branch C wall correction": S_wall_c,
+            "Branch A wall correction integral": pybamm.Integral(S_wall_a, self.c_p_a),
+            "Branch B wall correction integral": pybamm.Integral(S_wall_b, self.c_p_b),
+            "Branch C wall correction integral": pybamm.Integral(S_wall_c, self.c_p_c),
+            "CCPM source mass balance error": source_error,
+        })
 
         self.rhs = {
-            g_a: rhs_a + S_a,
-            g_b: rhs_b + S_b,
-            g_c: rhs_c + S_c,
+            g_a: rhs_a + S_a + S_wall_a,
+            g_b: rhs_b + S_b + S_wall_b,
+            g_c: rhs_c + S_c + S_wall_c,
         }
-        
-    def _get_transition_sources(self, variables, F_a, F_b, F_c):
+
+    def _get_sources_and_corrections(self, variables):
         """
-        Eq 18-20 from Clarke2026: source/sink terms for transitions between branches.
+        Compute transition sources AND wall corrections in one place so they
+        share exactly the same R_edge and g_cell values at each boundary.
 
-        Uses flux-form extraction: the scalar transfer magnitude J equals the
-        actual upwind advective flux evaluated at the transition point (via
-        EvaluateAt), ensuring exact consistency with the advection scheme.
-        Deposition into the receiving branch uses a regularized Gaussian delta
-        to spread mass over a few cells.
+        At every Dirichlet-g=0 boundary the FV upwind scheme produces:
+          F_edge = g_cell · |R_edge|       (ghost = -g_cell)
+
+        The mass removed from each domain at this edge is g_cell·|R_edge|.
+        We split this into:
+          • "correct direction" flux: deposited into receiving branch
+          • "wrong direction" flux:   added back as wall correction
+
+        Physical walls (A-left, C-right): ALL flux is spurious → full correction.
+        Transition edges: only the wrong-direction part is corrected.
+
+        Using the SAME R_edge for both J and wall_corr guarantees:
+          J + wall_corr = g_cell · |R_edge| = FV removal
+        → exact mass conservation.
         """
-        c_p = variables["CCPM positive particle concentration"]
+        c_p_a = self.c_p_a
+        c_p_b = self.c_p_b
+        c_p_c = self.c_p_c
+        c_max = self.param.p.prim.c_max
+        eps_c = pybamm.Scalar(1e-8) * c_max
+        c1_star, c_sp1, c_sp2, c2_star = self._branch_boundaries()
 
-        # Deposition kernel (normalized Gaussian)
-        def regularized_delta(c_target, mask):
-            eps_c = pybamm.Scalar(1e-8) * self.param.p.prim.c_max
-            c_min = eps_c
-            c_max_eff = self.param.p.prim.c_max - eps_c
-            dc = (c_max_eff - c_min) / (300 - 1)
-            sigma = 1.5 * dc
-            ker = pybamm.exp(-((c_p - c_target) ** 2) / (2 * sigma ** 2)) * mask
-            return ker / pybamm.Integral(ker, c_p)
-
-        # Transition points and masks
-        c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = (
-            self._branch_geometry(c_p)
-        )
         g_a = variables["Branch A PDF CCPM"]
         g_b = variables["Branch B PDF CCPM"]
         g_c = variables["Branch C PDF CCPM"]
@@ -249,119 +233,205 @@ class CCPMPositiveParticle(BaseParticle):
         R_b = variables["CCPM Branch B lithiation rate"]
         R_c = variables["CCPM Branch C lithiation rate"]
 
-        if self.source_method == "flux_form":
-            # --- Flux-form scalar transfer magnitudes ---
-            # Evaluate g and R at the transition point (cell center nearest),
-            # forming the upwind flux g * max(R, 0). Matches advection exactly.
-            J_A_to_B = (
-                pybamm.EvaluateAt(g_a, c_sp1)
-                * pybamm.Maximum(pybamm.EvaluateAt(R_a, c_sp1), 0)
-            )
-            J_B_to_A = (
-                pybamm.EvaluateAt(g_b, c1_star)
-                * pybamm.Maximum(-pybamm.EvaluateAt(R_b, c1_star), 0)
-            )
-            J_B_to_C = (
-                pybamm.EvaluateAt(g_b, c2_star)
-                * pybamm.Maximum(pybamm.EvaluateAt(R_b, c2_star), 0)
-            )
-            J_C_to_B = (
-                pybamm.EvaluateAt(g_c, c_sp2)
-                * pybamm.Maximum(-pybamm.EvaluateAt(R_c, c_sp2), 0)
-            )
-        else:
-            # --- Old Gaussian-integral scalar transfer magnitudes ---
-            dA_ext = regularized_delta(c_sp1, mask_a)
-            dB_ext_c1 = regularized_delta(c1_star, mask_b)
-            dB_ext_c2 = regularized_delta(c2_star, mask_b)
-            dC_ext = regularized_delta(c_sp2, mask_c)
-            J_A_to_B = pybamm.Integral(dA_ext * g_a * pybamm.Maximum(R_a, 0), c_p)
-            J_B_to_A = pybamm.Integral(dB_ext_c1 * g_b * pybamm.Maximum(-R_b, 0), c_p)
-            J_B_to_C = pybamm.Integral(dB_ext_c2 * g_b * pybamm.Maximum(R_b, 0), c_p)
-            J_C_to_B = pybamm.Integral(dC_ext * g_c * pybamm.Maximum(-R_c, 0), c_p)
+        n_a, n_b, n_c = self.n_pts_a, self.n_pts_b, self.n_pts_c
+        dc_a = (c_sp1 - eps_c) / n_a
+        dc_b = (c2_star - c1_star) / n_b
+        dc_c = (c_max - eps_c - c_sp2) / n_c
+        width_a = c_sp1 - eps_c
+        width_b = c2_star - c1_star
+        width_c = c_max - eps_c - c_sp2
 
-        # --- Deposition kernels (receiving branch only) ---
-        # The advective flux is now truncated at the branch boundary
-        # (masked PDFs + masked divergence), so mass that reaches
-        # the boundary naturally leaves the donor branch via the
-        # divergence term.  Only the *deposition* into the receiving
-        # branch needs an explicit source.
-        dB_sp1 = regularized_delta(c_sp1, mask_b)  # A->B deposit into B at c_sp1
-        dA_c1  = regularized_delta(c1_star, mask_a) # B->A deposit into A at c1*
-        dC_c2  = regularized_delta(c2_star, mask_c) # B->C deposit into C at c2*
-        dB_sp2 = regularized_delta(c_sp2, mask_b)   # C->B deposit into B at c_sp2
+        half = pybamm.Scalar(0.5)
+        three_half = pybamm.Scalar(1.5)
 
-        # --- Source terms (deposition only, no removal) ---
+        def _edge_R(R_var, c_cell, c_neighbour):
+            """FV node-to-edge linear extrapolation at a boundary."""
+            R0 = pybamm.EvaluateAt(R_var, c_cell)
+            R1 = pybamm.EvaluateAt(R_var, c_neighbour)
+            return three_half * R0 - half * R1
+
+        def regularized_delta_on(c_target, c_domain_var, dc):
+            """Normalised Gaussian delta on the given domain variable."""
+            sigma = 1.5 * dc
+            ker = pybamm.exp(-((c_domain_var - c_target) ** 2) / (2 * sigma ** 2))
+            return ker / pybamm.Integral(ker, c_domain_var)
+
+        # ================================================================
+        # Domain A boundaries
+        # ================================================================
+        # Left (physical wall at c_p = eps_c): correct ALL ghost flux
+        c_a0 = eps_c + dc_a * half
+        c_a1 = eps_c + dc_a * three_half
+        g_a0 = pybamm.EvaluateAt(g_a, c_a0)
+        R_edge_AL = _edge_R(R_a, c_a0, c_a1)
+        corr_AL = g_a0 * (pybamm.Maximum(R_edge_AL, 0)
+                          - pybamm.Minimum(R_edge_AL, 0))  # |R_edge|
+
+        # Right (transition A→B at c_sp1)
+        c_aN = c_sp1 - dc_a * half       # last cell of A
+        c_aN1 = c_sp1 - dc_a * three_half  # second-to-last
+        g_aN = pybamm.EvaluateAt(g_a, c_aN)
+        R_edge_AR = _edge_R(R_a, c_aN, c_aN1)
+        # Correct direction: R>0 (outflow A→B) → transition flux
+        J_A_to_B = g_aN * pybamm.Maximum(R_edge_AR, 0)
+        # Wrong direction: R<0 (ghost reflux) → wall correction
+        corr_AR = g_aN * pybamm.Maximum(-R_edge_AR, 0)
+
+        # Localized corrections: each boundary's correction goes back near
+        # that boundary cell to prevent cross-talk between boundaries.
+        delta_a_left  = regularized_delta_on(c_a0, c_p_a, dc_a)
+        delta_a_right = regularized_delta_on(c_aN, c_p_a, dc_a)
+        S_wall_a = corr_AL * delta_a_left + corr_AR * delta_a_right
+
+        # ================================================================
+        # Domain B boundaries
+        # ================================================================
+        # Left (transition B→A at c1_star)
+        c_b0 = c1_star + dc_b * half
+        c_b1 = c1_star + dc_b * three_half
+        g_b0 = pybamm.EvaluateAt(g_b, c_b0)
+        R_edge_BL = _edge_R(R_b, c_b0, c_b1)
+        # Correct direction: R<0 (outflow B→A) → transition flux
+        J_B_to_A = g_b0 * pybamm.Maximum(-R_edge_BL, 0)
+        # Wrong direction: R>0 → wall correction
+        corr_BL = g_b0 * pybamm.Maximum(R_edge_BL, 0)
+
+        # Right (transition B→C at c2_star)
+        c_bN = c2_star - dc_b * half
+        c_bN1 = c2_star - dc_b * three_half
+        g_bN = pybamm.EvaluateAt(g_b, c_bN)
+        R_edge_BR = _edge_R(R_b, c_bN, c_bN1)
+        # Correct direction: R>0 (outflow B→C) → transition flux
+        J_B_to_C = g_bN * pybamm.Maximum(R_edge_BR, 0)
+        # Wrong direction: R<0 → wall correction
+        corr_BR = g_bN * pybamm.Maximum(-R_edge_BR, 0)
+
+        delta_b_left  = regularized_delta_on(c_b0, c_p_b, dc_b)
+        delta_b_right = regularized_delta_on(c_bN, c_p_b, dc_b)
+        S_wall_b = corr_BL * delta_b_left + corr_BR * delta_b_right
+
+        # ================================================================
+        # Domain C boundaries
+        # ================================================================
+        # Left (transition C→B at c_sp2)
+        c_c0 = c_sp2 + dc_c * half
+        c_c1 = c_sp2 + dc_c * three_half
+        g_c0 = pybamm.EvaluateAt(g_c, c_c0)
+        R_edge_CL = _edge_R(R_c, c_c0, c_c1)
+        # Correct direction: R<0 (outflow C→B) → transition flux
+        J_C_to_B = g_c0 * pybamm.Maximum(-R_edge_CL, 0)
+        # Wrong direction: R>0 → wall correction
+        corr_CL = g_c0 * pybamm.Maximum(R_edge_CL, 0)
+
+        # Right (physical wall at c_max - eps_c): correct ALL ghost flux
+        c_right = c_max - eps_c
+        c_cN = c_right - dc_c * half
+        c_cN1 = c_right - dc_c * three_half
+        g_cN = pybamm.EvaluateAt(g_c, c_cN)
+        R_edge_CR = _edge_R(R_c, c_cN, c_cN1)
+        corr_CR = g_cN * (pybamm.Maximum(R_edge_CR, 0)
+                          - pybamm.Minimum(R_edge_CR, 0))  # |R_edge|
+
+        delta_c_left  = regularized_delta_on(c_c0, c_p_c, dc_c)
+        delta_c_right = regularized_delta_on(c_cN, c_p_c, dc_c)
+        S_wall_c = corr_CL * delta_c_left + corr_CR * delta_c_right
+
+        # ================================================================
+        # Deposition kernels on receiving domains
+        # ================================================================
+        dA_c1  = regularized_delta_on(c1_star, c_p_a, dc_a)
+        dB_sp1 = regularized_delta_on(c_sp1,  c_p_b, dc_b)
+        dB_sp2 = regularized_delta_on(c_sp2,  c_p_b, dc_b)
+        dC_c2  = regularized_delta_on(c2_star, c_p_c, dc_c)
+
+        # Source terms: deposition only (removal handled by FV BCs + wall corr)
         S_a = J_B_to_A * dA_c1
         S_b = J_A_to_B * dB_sp1 + J_C_to_B * dB_sp2
         S_c = J_B_to_C * dC_c2
 
-        return S_a, S_b, S_c, J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B
-    
+        return (S_a, S_b, S_c,
+                S_wall_a, S_wall_b, S_wall_c,
+                J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B)
+
     def set_boundary_conditions(self, variables):
         g_a = variables["Branch A PDF CCPM"]
         g_b = variables["Branch B PDF CCPM"]
         g_c = variables["Branch C PDF CCPM"]
         zero = pybamm.Scalar(0)
+
+        # Clarke eq 62 boundary conditions
+        #
+        # PHYSICAL WALLS (Fa|cp=0 = 0, Fc|cp=cmax = 0):
+        #   Dirichlet g=0 required by PyBaMM's upwind scheme.
+        #   Ghost = −g_first creates spurious wall flux.
+        #   Corrected via source term in set_rhs (see _wall_correction_sources).
+        #
+        # TRANSITION EDGES (outflow-only at csp1, c1*, c2*, csp2):
+        #   Dirichlet g=0 lets the upwind scheme only advect mass outward.
+
         self.boundary_conditions = {
             g_a: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
             g_b: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
             g_c: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
         }
-    
+
     def set_initial_conditions(self, variables):
         g_a = variables["Branch A PDF CCPM"]
         g_b = variables["Branch B PDF CCPM"]
         g_c = variables["Branch C PDF CCPM"]
         c_max = self.param.p.prim.c_max
-        c_sp1 = 0.2113*c_max #TODO: cast to scalar?
-        c_sp2=0.7887*c_max #TODO
-        
-        
-        c_p = variables["CCPM positive particle concentration"] 
-        c_init_particle=self.param.p.prim.c_init # r domain
-        # collapse to electrode (r-average), then broadcast into concentration domain
-        c_init_x = pybamm.r_average(c_init_particle) # positive electrode domain
-        variables.update({ "Initial CCPM particle concentration": c_init_x})
-
-        # Asymmetric initial PDF: Gamma(2,λ) shape ensures g(c_min)=0
-        # while keeping the mode at c_init. Avoids left-tail clipping that
-        # a symmetric Gaussian would suffer when c_init is near the boundary.
         eps_c = pybamm.Scalar(1e-8) * c_max
-        c_min_domain = eps_c
-        c_init_cp = pybamm.PrimaryBroadcast(c_init_x, "CCPM positive particle concentration")
-        # lam numerically corrected via brentq on 300-pt grid so that the
-        # discrete trapezoid mean equals c_init exactly (theta=0.0038, Prada2013).
-        # Analytical lam=(c_init-c_min)/2 gives discrete mean ~theta=0.0047 due
-        # to sub-grid resolution (c_init ≈ 1.1*dc). Corrected: lam=27.7, dc=76.3.
-        lam = pybamm.Scalar(1.214e-3) * c_max
-        shifted = c_p - c_min_domain
-        initial_distribution_a = (
-            shifted * pybamm.exp(-shifted / lam) * (c_p <= c_sp1)
+        c1_star, c_sp1, c_sp2, c2_star = self._branch_boundaries()
+
+        c_p_a = self.c_p_a
+        c_p_b = self.c_p_b
+        c_p_c = self.c_p_c
+
+        # Gamma(k,λ) shape: g(c) ∝ (c - c_min)^(k-1) * exp(-(c - c_min)/λ)
+        # with mean = k·λ = c_init  →  λ = c_init / k.
+        # k = 10 gives g ≈ 0 at the first cell centre (wall ghost leak ≈ 0)
+        # while keeping the peak near c_init and θ(0) = c_init / c_max.
+        c_init = pybamm.Parameter(
+            "Initial concentration in positive electrode [mol.m-3]"
         )
-        
-        # Normalize so the integral over c_p is 1 (Particle Conservation)
-        # We start with everything in Branch C for a lithiated cathode
-        # or Branch A for a delithiated one.
-        norm = pybamm.Integral(initial_distribution_a, c_p)
-        initial_pdf = initial_distribution_a / norm # normalised
-        
-        zero_pdf = 0 * initial_pdf
+        k_shape = pybamm.Scalar(10)
+        lam = c_init / k_shape
+
+        def gamma_pdf_on(c_domain_var, c_left, c_domain_spatial_var):
+            """Normalised Gamma(k,λ) on the given branch domain."""
+            shifted = c_domain_var - c_left
+            dist = shifted ** (k_shape - 1) * pybamm.exp(-shifted / lam)
+            norm = pybamm.Integral(dist, c_domain_spatial_var)
+            return dist / norm
+
+        # Zero ICs retain domain structure via multiplication with spatial variable
+        zero_a = pybamm.Scalar(0) * c_p_a
+        zero_b = pybamm.Scalar(0) * c_p_b
+        zero_c = pybamm.Scalar(0) * c_p_c
 
         if self.initial_branch == "A":
+            init_a = gamma_pdf_on(c_p_a, eps_c,   c_p_a)
             self.initial_conditions = {
-                g_a: initial_pdf,
-                g_b: zero_pdf,
-                g_c: zero_pdf,
+                g_a: init_a,
+                g_b: zero_b,
+                g_c: zero_c,
+            }
+        elif self.initial_branch == "B":
+            init_b = gamma_pdf_on(c_p_b, c1_star, c_p_b)
+            self.initial_conditions = {
+                g_a: zero_a,
+                g_b: init_b,
+                g_c: zero_c,
             }
         elif self.initial_branch == "C":
+            init_c = gamma_pdf_on(c_p_c, c_sp2, c_p_c)
             self.initial_conditions = {
-                g_a: zero_pdf,
-                g_b: zero_pdf,
-                g_c: initial_pdf,
+                g_a: zero_a,
+                g_b: zero_b,
+                g_c: init_c,
             }
         else:
             raise ValueError(
                 f"Invalid CCPM initial_branch='{self.initial_branch}'. "
-                "Use 'A' or 'C'."
+                "Use 'A', 'B', or 'C'."
             )
