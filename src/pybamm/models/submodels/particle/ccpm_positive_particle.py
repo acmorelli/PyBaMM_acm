@@ -18,8 +18,9 @@ class CCPMPositiveParticle(BaseParticle):
         domain="positive",
         options=None,
         phase="primary",
-        initial_branch="C",
-        source_method="flux_form",
+        initial_branch="A",
+        source_method='gaussian'
+
     ):
         super().__init__(
             param,
@@ -74,7 +75,8 @@ class CCPMPositiveParticle(BaseParticle):
 
         return variables
     def _branch_geometry(self, c_p):
-        c_max = self.param.p.prim.c_max
+        eps=1e-8*self.param.p.prim.c_max 
+        c_max = self.param.p.prim.c_max -eps
 
         c1_star = pybamm.Scalar(0.0710) * c_max
         c_sp1   = pybamm.Scalar(0.2113) * c_max
@@ -87,20 +89,21 @@ class CCPMPositiveParticle(BaseParticle):
         mask_c = (c_p >= c_sp2)
 
         return c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c
-    
+
     def get_coupled_variables(self, variables):
         # Retrieve our PDFs and the concentration grid
-        g_a_unmasked = variables["Branch A PDF CCPM"]
-        g_b_unmasked = variables["Branch B PDF CCPM"]
-        g_c_unmasked = variables["Branch C PDF CCPM"]
+        g_a= variables["Branch A PDF CCPM"]
+        g_b= variables["Branch B PDF CCPM"]
+        g_c= variables["Branch C PDF CCPM"]
         c_p = variables["CCPM positive particle concentration"]
-        c_max = self.param.p.prim.c_max
+        eps=1e-8*self.param.p.prim.c_max 
+        c_max = self.param.p.prim.c_max -eps
 
         # mask density functions
         c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = self._branch_geometry(c_p)
-        g_a = g_a_unmasked * mask_a
-        g_b = g_b_unmasked * mask_b
-        g_c = g_c_unmasked * mask_c
+        #g_a = g_a_unmasked * mask_a
+        #g_b = g_b_unmasked * mask_b
+        #g_c = g_c_unmasked * mask_c
         # 2. Calculate the average stoichiometry for the CCPM
         # This is the integral of (c * total_PDF) / c_max
         # This replaces the old 'theta_a_ref' logic with real PDF physics
@@ -114,16 +117,16 @@ class CCPMPositiveParticle(BaseParticle):
         m_tot = m_a + m_b + m_c
         
         # include rhs_c
-        cbar_c = pybamm.Integral(g_c * c_p, c_p) / pybamm.Maximum(m_c, 1e-16) # average concentration in branch C
-        m_a_raw = pybamm.Integral(variables["Branch A PDF CCPM"], c_p)
-        m_b_raw = pybamm.Integral(variables["Branch B PDF CCPM"], c_p)
-        m_c_raw = pybamm.Integral(variables["Branch C PDF CCPM"], c_p)
-        m_tot_raw = m_a_raw + m_b_raw + m_c_raw
+        #cbar_c = pybamm.Integral(g_c * c_p, c_p) / pybamm.Maximum(m_c, 1e-16) # average concentration in branch C
+        #m_a_raw = pybamm.Integral(variables["Branch A PDF CCPM"], c_p)
+        #m_b_raw = pybamm.Integral(variables["Branch B PDF CCPM"], c_p)
+        #m_c_raw = pybamm.Integral(variables["Branch C PDF CCPM"], c_p)
+        #m_tot_raw = m_a_raw + m_b_raw + m_c_raw
         variables.update({
-            "CCPM Unmasked Mass Branch A": m_a_raw,
-            "CCPM Unmasked Mass Branch B": m_b_raw,
-            "CCPM Unmasked Mass Branch C": m_c_raw,
-            "CCPM Unmasked Total Mass": m_tot_raw,
+            #"CCPM Unmasked Mass Branch A": m_a_raw,
+            #"CCPM Unmasked Mass Branch B": m_b_raw,
+            #"CCPM Unmasked Mass Branch C": m_c_raw,
+            #"CCPM Unmasked Total Mass": m_tot_raw,
             "Branch A PDF CCPM Masked": g_a,
             "Branch B PDF CCPM Masked": g_b,
             "Branch C PDF CCPM Masked": g_c,
@@ -134,7 +137,7 @@ class CCPMPositiveParticle(BaseParticle):
             "Positive CCPM stoichiometry": theta_CCPM,
             "X-averaged positive CCPM stoichiometry": pybamm.x_average(theta_CCPM),
             "CCPM Total PDF sum": g_a + g_b + g_c, # Should integrate to 1,
-            "CCPM Branch C mean concentration": cbar_c,
+            #"CCPM Branch C mean concentration": cbar_c,
             "X-averaged Branch A PDF CCPM": pybamm.x_average(g_a),
             "X-averaged Branch B PDF CCPM": pybamm.x_average(g_b),
             "X-averaged Branch C PDF CCPM": pybamm.x_average(g_c),
@@ -177,8 +180,10 @@ class CCPMPositiveParticle(BaseParticle):
         )
 
         def adv_flux(g, R):
-            R_pos = pybamm.Maximum(R, 0)
-            R_neg = pybamm.Minimum(R, 0)
+            #R_pos = pybamm.Maximum(R, 0)
+            R_pos=pybamm.smooth_max(R, 0, 100)
+            #R_neg = pybamm.Minimum(R, 0)
+            R_neg=pybamm.smooth_min(R,0,100)
             return pybamm.Upwind(g) * R_pos + pybamm.Downwind(g) * R_neg
 
         F_a = adv_flux(g_a, R_a)
@@ -248,53 +253,49 @@ class CCPMPositiveParticle(BaseParticle):
         R_a = variables["CCPM Branch A lithiation rate"]
         R_b = variables["CCPM Branch B lithiation rate"]
         R_c = variables["CCPM Branch C lithiation rate"]
-
+        dB_sp1 = regularized_delta(c_sp1, mask_b)  # A->B deposit into B at c_sp1
+        dA_c1  = regularized_delta(c1_star, mask_a) # B->A deposit into A at c1*
+        dC_c2  = regularized_delta(c2_star, mask_c) # B->C deposit into C at c2*
+        dB_sp2 = regularized_delta(c_sp2, mask_b)   # C->B deposit into B at c_sp2
         if self.source_method == "flux_form":
             # --- Flux-form scalar transfer magnitudes ---
             # Evaluate g and R at the transition point (cell center nearest),
             # forming the upwind flux g * max(R, 0). Matches advection exactly.
             J_A_to_B = (
                 pybamm.EvaluateAt(g_a, c_sp1)
-                * pybamm.Maximum(pybamm.EvaluateAt(R_a, c_sp1), 0)
+                * pybamm.smooth_max(pybamm.EvaluateAt(R_a, c_sp1), 0,100)
             )
             J_B_to_A = (
                 pybamm.EvaluateAt(g_b, c1_star)
-                * pybamm.Maximum(-pybamm.EvaluateAt(R_b, c1_star), 0)
+                * pybamm.smooth_max(-pybamm.EvaluateAt(R_b, c1_star), 0,100)
             )
             J_B_to_C = (
                 pybamm.EvaluateAt(g_b, c2_star)
-                * pybamm.Maximum(pybamm.EvaluateAt(R_b, c2_star), 0)
+                * pybamm.smooth_max(pybamm.EvaluateAt(R_b, c2_star), 0,100)
             )
             J_C_to_B = (
                 pybamm.EvaluateAt(g_c, c_sp2)
-                * pybamm.Maximum(-pybamm.EvaluateAt(R_c, c_sp2), 0)
+                * pybamm.smooth_max(-pybamm.EvaluateAt(R_c, c_sp2), 0,100)
             )
+
+            S_a = J_B_to_A * dA_c1
+            S_b = J_A_to_B * dB_sp1 + J_C_to_B * dB_sp2
+            S_c = J_B_to_C * dC_c2
         else:
-            # --- Old Gaussian-integral scalar transfer magnitudes ---
+            #  Gaussian integral scalar transfer magnitudes 
             dA_ext = regularized_delta(c_sp1, mask_a)
             dB_ext_c1 = regularized_delta(c1_star, mask_b)
             dB_ext_c2 = regularized_delta(c2_star, mask_b)
             dC_ext = regularized_delta(c_sp2, mask_c)
-            J_A_to_B = pybamm.Integral(dA_ext * g_a * pybamm.Maximum(R_a, 0), c_p)
-            J_B_to_A = pybamm.Integral(dB_ext_c1 * g_b * pybamm.Maximum(-R_b, 0), c_p)
-            J_B_to_C = pybamm.Integral(dB_ext_c2 * g_b * pybamm.Maximum(R_b, 0), c_p)
-            J_C_to_B = pybamm.Integral(dC_ext * g_c * pybamm.Maximum(-R_c, 0), c_p)
+            J_A_to_B = pybamm.Integral(dA_ext * g_a * pybamm.smooth_max(R_a, 0,100), c_p)
+            J_B_to_A = pybamm.Integral(dB_ext_c1 * g_b * pybamm.smooth_max(-R_b, 0,100), c_p)
+            J_B_to_C = pybamm.Integral(dB_ext_c2 * g_b * pybamm.smooth_max(R_b, 0,100), c_p)
+            J_C_to_B = pybamm.Integral(dC_ext * g_c * pybamm.smooth_max(-R_c, 0,100), c_p)
+            #only discharge A-> B -> C
+            S_a= -J_A_to_B*dA_ext
+            S_b= J_A_to_B*dB_sp1 -J_B_to_C *dB_ext_c2
+            S_c= J_B_to_C * dC_c2
 
-        # --- Deposition kernels (receiving branch only) ---
-        # The advective flux is now truncated at the branch boundary
-        # (masked PDFs + masked divergence), so mass that reaches
-        # the boundary naturally leaves the donor branch via the
-        # divergence term.  Only the *deposition* into the receiving
-        # branch needs an explicit source.
-        dB_sp1 = regularized_delta(c_sp1, mask_b)  # A->B deposit into B at c_sp1
-        dA_c1  = regularized_delta(c1_star, mask_a) # B->A deposit into A at c1*
-        dC_c2  = regularized_delta(c2_star, mask_c) # B->C deposit into C at c2*
-        dB_sp2 = regularized_delta(c_sp2, mask_b)   # C->B deposit into B at c_sp2
-
-        # --- Source terms (deposition only, no removal) ---
-        S_a = J_B_to_A * dA_c1
-        S_b = J_A_to_B * dB_sp1 + J_C_to_B * dB_sp2
-        S_c = J_B_to_C * dC_c2
 
         return S_a, S_b, S_c, J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B
     

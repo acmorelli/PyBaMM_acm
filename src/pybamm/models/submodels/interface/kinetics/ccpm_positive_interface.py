@@ -22,7 +22,7 @@ class CCPMPositiveInterface(BaseKinetics):
         g_b = variables["Branch B PDF CCPM"]
         g_c = variables["Branch C PDF CCPM"]
         c_p = variables["CCPM positive particle concentration"] # spatial variable
-        c_p_max = self.param.p.prim.c_max 
+        c_p_max = self.param.p.prim.c_max - (1e-8*self.param.p.prim.c_max )
         theta_p= c_p/c_p_max
         
         # Physical constants and parameters
@@ -80,13 +80,21 @@ class CCPMPositiveInterface(BaseKinetics):
         j_tr_a, j_tr_b, j_tr_c, j_tot = self._get_ccpm_currents(variables)
         F = pybamm.constants.F
         R_p = self.param.p.prim.R   # or self.param.p.prim.R
-        beta = 3 / (F * R_p) #TODO - A/FV: spherical particles
-
-        R_a = -beta * j_tr_a
-        R_b = -beta * j_tr_b
-        R_c = -beta * j_tr_c
         c_p= variables["CCPM positive particle concentration"]
-        c_max = self.param.p.prim.c_max
+        c_p_max = self.param.p.prim.c_max - (1e-8*self.param.p.prim.c_max )
+        c1_star = 0.071* c_p_max # from Clarke
+        c2_star = 0.929* c_p_max # from Clarke
+        c_sp1 = 0.2113 * c_p_max # from Clarke
+        c_sp2 = 0.7887 * c_p_max # from Clarke
+
+        beta = 3 / (F * R_p) #TODO - A/FV: spherical particles
+        mask_a = (c_p <= c_sp1)
+        mask_b = (c1_star <= c_p) * (c_p <= c2_star)
+        mask_c = (c_sp2 <= c_p)
+        R_a = -beta * j_tr_a * mask_a
+        R_b = -beta * j_tr_b *mask_b
+        R_c = -beta * j_tr_c *mask_c
+
 
 
         return j_tr_a, j_tr_b, j_tr_c, j_tot, R_a, R_b, R_c

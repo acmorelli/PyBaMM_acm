@@ -10,14 +10,14 @@ import pickle
 import pybamm
 from pybamm.models.full_battery_models.lithium_ion.dfn_ccpm import DFN_CCPM
 
-PICKLE_PATH = "ccpm_gaussian_2100s.pkl"
+PICKLE_PATH = "ccpm_gaussian_100s.pkl"
 
 
 # ── Build & solve ──────────────────────────────────────────────────────────────
 print("Building model (gaussian) …")
 model = DFN_CCPM(build=True, initial_branch="A", source_method="gaussian")
 param = pybamm.ParameterValues("Prada2013")
-experiment = pybamm.Experiment(["Discharge at 1C for 2100 seconds"])
+experiment = pybamm.Experiment(["Discharge at 1C for 100 seconds"])
 sim = pybamm.Simulation(
     model,
     parameter_values=param,
@@ -42,7 +42,7 @@ m_a   = sol["X-averaged CCPM Branch A mass"].entries
 m_b   = sol["X-averaged CCPM Branch B mass"].entries
 m_c   = sol["X-averaged CCPM Branch C mass"].entries
 m_tot = sol["X-averaged CCPM Total mass"].entries
-m_tot_raw = np.mean(sol["CCPM Unmasked Total Mass"].entries, axis=0)
+#m_tot_raw = np.mean(sol["CCPM Unmasked Total Mass"].entries, axis=0)
 
 J_AB  = sol["Branch A to B scalar flux"].entries
 J_BA  = sol["Branch B to A scalar flux"].entries
@@ -75,8 +75,8 @@ print(f"  GAUSSIAN — 2100 s 1C discharge  ({len(time)} timesteps)")
 print(f"{'='*65}")
 print(f"  Voltage:        {V[0]:.4f} → {V[-1]:.4f} V")
 print(f"  θ_CCPM:         {theta[0]:.6f} → {theta[-1]:.6f}  (c_sp1/c_max={c_sp1/c_max:.4f})")
-print(f"  MASKED   mass:  {m_tot[0]:.6f} → {m_tot[-1]:.6f}   drift = {m_tot[-1]-m_tot[0]:+.3e}")
-print(f"  UNMASKED mass:  {m_tot_raw[0]:.6f} → {m_tot_raw[-1]:.6f}   drift = {m_tot_raw[-1]-m_tot_raw[0]:+.3e}")
+print(f"  unMASKED   mass:  {m_tot[0]:.6f} → {m_tot[-1]:.6f}   drift = {m_tot[-1]-m_tot[0]:+.3e}")
+#print(f"  UNMASKED mass:  {m_tot_raw[0]:.6f} → {m_tot_raw[-1]:.6f}   drift = {m_tot_raw[-1]-m_tot_raw[0]:+.3e}")
 print(f"  Source error:   max|∫(Sa+Sb+Sc)|= {np.max(np.abs(S_err)):.3e}")
 print(f"\n  Branch masses at t=end:  A={m_a[-1]:.6f}  B={m_b[-1]:.6f}  C={m_c[-1]:.6f}")
 
@@ -101,7 +101,7 @@ fig.suptitle("CCPM Gaussian — 2100 s 1C discharge", fontsize=13)
 ax = axes[0, 0]
 ax.plot(time, m_a, label="m_A"); ax.plot(time, m_b, label="m_B")
 ax.plot(time, m_c, label="m_C"); ax.plot(time, m_tot, "k--", label="m_tot (masked)")
-ax.plot(time, m_tot_raw, "k:", label="m_tot (unmasked)")
+ax.plot(time, m_tot, "k:", label="m_tot (unmasked)")
 ax.set_xlabel("Time [s]"); ax.set_ylabel("X-avg branch mass"); ax.set_title("Branch masses")
 ax.legend(fontsize=8)
 
