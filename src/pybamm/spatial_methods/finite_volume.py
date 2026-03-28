@@ -244,8 +244,40 @@ class FiniteVolume(pybamm.SpatialMethod):
     def divergence(self, symbol, discretised_symbol, boundary_conditions):
         """Matrix-vector multiplication to implement the divergence operator.
         See :meth:`pybamm.SpatialMethod.divergence`
+
+        If any variable on the same primary domain has a "zero_flux" boundary
+        condition, the corresponding boundary entry of the discretised flux is
+        zeroed before the divergence matrix is applied.  This enforces a true
+        zero-flux wall without modifying the interior upwind stencil.
         """
         submesh = self.mesh[symbol.domain]
+
+        # Detect "zero_flux" BCs on the same primary domain
+        zero_left = False
+        zero_right = False
+        for var, bcs in boundary_conditions.items():
+            if var.domain == symbol.domain:
+                if "left" in bcs and bcs["left"][1] == "zero_flux":
+                    zero_left = True
+                if "right" in bcs and bcs["right"][1] == "zero_flux":
+                    zero_right = True
+
+        if zero_left or zero_right:
+            n = submesh.npts
+            second_dim_repeats = self._get_auxiliary_domain_repeats(symbol.domains)
+            # Build a diagonal mask (n+1 edges) with 0 at zeroed boundaries
+            mask = np.ones(n + 1)
+            if zero_left:
+                mask[0] = 0.0
+            if zero_right:
+                mask[n] = 0.0
+            mask_sub = diags(mask, shape=(n + 1, n + 1), dtype=np.float64)
+            mask_matrix = pybamm.Matrix(
+                csr_matrix(
+                    kron(eye(second_dim_repeats, dtype=np.float64), mask_sub)
+                )
+            )
+            discretised_symbol = mask_matrix @ discretised_symbol
 
         divergence_matrix = self.divergence_matrix(symbol.domains)
 
@@ -1811,13 +1843,15 @@ class FiniteVolume(pybamm.SpatialMethod):
         elif direction == "downwind":
             bc_side = "right"
 
-        if bcs[symbol][bc_side][1] != "Dirichlet":
+        if bcs[symbol][bc_side][1] not in ("Dirichlet", "zero_flux"):
             raise pybamm.ModelError(
                 "Dirichlet boundary conditions must be provided for "
                 f"{direction}ing '{symbol}'"
             )
 
         # Extract only the relevant boundary condition as the model might have both
-        bc_subset = {bc_side: bcs[symbol][bc_side]}
+        # Treat "zero_flux" as "Dirichlet" for ghost node construction
+        bc_val, bc_type = bcs[symbol][bc_side]
+        bc_subset = {bc_side: (bc_val, "Dirichlet")}
         symbol_out, _ = self.add_ghost_nodes(symbol, discretised_symbol, bc_subset)
         return symbol_out

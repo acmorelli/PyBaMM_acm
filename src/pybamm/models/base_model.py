@@ -2329,9 +2329,10 @@ class BoundaryConditionsDict(dict):
                     eqn, typ = boundary_conditions[var][side]
                     boundary_conditions[var][side] = (pybamm.Scalar(eqn), typ)
                 # Check types
-                if bc[1] not in ["Dirichlet", "Neumann"]:
+                if bc[1] not in ["Dirichlet", "Neumann", "zero_flux"]:
                     raise pybamm.ModelError(
-                        f"boundary condition types must be Dirichlet or Neumann, not '{bc[1]}'"
+                        f"boundary condition types must be Dirichlet, Neumann,"
+                        f" or zero_flux, not '{bc[1]}'"
                     )
 
         return boundary_conditions

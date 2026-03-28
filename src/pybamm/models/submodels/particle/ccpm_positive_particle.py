@@ -288,9 +288,12 @@ class CCPMPositiveParticle(BaseParticle):
         g_c = variables["Branch C PDF CCPM"]
         zero = pybamm.Scalar(0)
         self.boundary_conditions = {
-            g_a: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
+            # Physical walls use "zero_flux": ghost nodes for upwind stencil,
+            # but divergence zeros the boundary flux → true zero-flux wall.
+            # Transition boundaries use standard "Dirichlet" g=0.
+            g_a: {"left": (zero, "zero_flux"), "right": (zero, "Dirichlet")},
             g_b: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
-            g_c: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
+            g_c: {"left": (zero, "Dirichlet"), "right": (zero, "zero_flux")},
         }
     
     def set_initial_conditions(self, variables):
