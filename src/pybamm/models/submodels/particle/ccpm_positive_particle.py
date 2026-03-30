@@ -78,10 +78,12 @@ class CCPMPositiveParticle(BaseParticle):
         eps=1e-8*self.param.p.prim.c_max 
         c_max = self.param.p.prim.c_max -eps
 
-        c1_star = pybamm.Scalar(0.0710) * c_max
-        c_sp1   = pybamm.Scalar(0.2113) * c_max
-        c_sp2   = pybamm.Scalar(0.7887) * c_max
-        c2_star = pybamm.Scalar(0.9290) * c_max
+        # Snapped to exact cell edges for npts=300 (edge indices 21,63,237,279)
+        npts = 300
+        c1_star = pybamm.Scalar(21 / npts) * c_max
+        c_sp1   = pybamm.Scalar(63 / npts) * c_max
+        c_sp2   = pybamm.Scalar(237 / npts) * c_max
+        c2_star = pybamm.Scalar(279 / npts) * c_max
 
         # same boolean-mask style you already used
         mask_a = (c_p <= c_sp1)
@@ -208,23 +210,22 @@ class CCPMPositiveParticle(BaseParticle):
         """
         Eq 18-20 from Clarke2026: source/sink terms for transitions between branches.
 
-        Uses flux-form extraction: the scalar transfer magnitude J equals the
-        actual upwind advective flux evaluated at the transition point (via
-        EvaluateAt), ensuring exact consistency with the advection scheme.
-        Deposition into the receiving branch uses a regularized Gaussian delta
-        to spread mass over a few cells.
+        Transfer magnitudes J equal the exact FV edge flux at the transition
+        boundary (via divergence telescoping).  Deposit into the receiving
+        branch goes into a single FV cell adjacent to the transition edge.
         """
         c_p = variables["CCPM positive particle concentration"]
 
-        # Deposition kernel (normalized Gaussian)
-        def regularized_delta(c_target, mask):
-            eps_c = pybamm.Scalar(1e-8) * self.param.p.prim.c_max
-            c_min = eps_c
-            c_max_eff = self.param.p.prim.c_max - eps_c
-            dc = (c_max_eff - c_min) / 300  # npts=300 cells, 301 edges
-            sigma = 1.5 * dc
-            ker = pybamm.exp(-((c_p - c_target) ** 2) / (2 * sigma ** 2)) * mask
-            return ker / pybamm.Integral(ker, c_p)
+        # Single-cell FV deposit: normalized box selecting one cell
+        eps_c = pybamm.Scalar(1e-8) * self.param.p.prim.c_max
+        c_max_eff = self.param.p.prim.c_max - eps_c
+        npts = 300
+        dc = (c_max_eff - eps_c) / npts
+
+        def cell_delta(c_edge_left):
+            """Normalized box for one FV cell starting at c_edge_left."""
+            box = (c_p >= c_edge_left) * (c_p <= c_edge_left + dc)
+            return box / pybamm.Integral(box, c_p)
 
         # Transition points and masks
         c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = (
@@ -236,10 +237,10 @@ class CCPMPositiveParticle(BaseParticle):
         R_a = variables["CCPM Branch A lithiation rate"]
         R_b = variables["CCPM Branch B lithiation rate"]
         R_c = variables["CCPM Branch C lithiation rate"]
-        dB_sp1 = regularized_delta(c_sp1, mask_b)  # A->B deposit into B at c_sp1
-        dA_c1  = regularized_delta(c1_star, mask_a) # B->A deposit into A at c1*
-        dC_c2  = regularized_delta(c2_star, mask_c) # B->C deposit into C at c2*
-        dB_sp2 = regularized_delta(c_sp2, mask_b)   # C->B deposit into B at c_sp2
+        dB_sp1 = cell_delta(c_sp1)          # A->B: into cell 63 of B
+        dA_c1  = cell_delta(c1_star - dc)   # B->A: into cell 20 of A
+        dC_c2  = cell_delta(c2_star)        # B->C: into cell 279 of C
+        dB_sp2 = cell_delta(c_sp2 - dc)     # C->B: into cell 236 of B
         if self.source_method == "flux_form":
             # compute scalar fluxes at transition points
             # Evaluate g and R at the transition point (cell center nearest),
@@ -266,16 +267,12 @@ class CCPMPositiveParticle(BaseParticle):
             S_c = J_B_to_C * dC_c2
         else:
             # Integrated-divergence approach: J equals the exact FV edge
-            # flux removed from the donor by div(F)*mask (telescoping sum).
-            # Deposit-only sources; removal is already in the RHS via
-            # -div(F)*mask, so NO extraction source is needed.
+            # flux at the transition boundary via divergence telescoping.
+            # Removal is already in the RHS via -div(F)*mask; sources only deposit.
             #
-            # A: zero_flux left wall  =>  Integral(div(F_a)*mask_a) = F_a[edge 63]
-            # B: Dirichlet g=0 walls  =>  Integral(div(F_b)*mask_b) = F_b[279]-F_b[21]
-            #    (F_b[21] ≈ 0 because g_b ≈ 0 near edge 21 during discharge)
-            # No smooth_max here: it has a floor of 0.005 (sigma=(1/k)^2)
-            # which creates spurious mass. During discharge these are
-            # naturally non-negative (rightward flux at domain edges).
+            # A: zero_flux left wall => Integral(div(F_a)*mask_a) = F_a[edge 63]
+            # B: single-cell deposit at cell 63 => g_b never reaches cell 21
+            #    => F_b[21]=0 => Integral(div(F_b)*mask_b) = F_b[edge 279]
             J_A_to_B = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)
             J_B_to_C = pybamm.Integral(pybamm.div(F_b) * mask_b, c_p)
             # Charge direction (future work)
@@ -309,8 +306,9 @@ class CCPMPositiveParticle(BaseParticle):
         g_b = variables["Branch B PDF CCPM"]
         g_c = variables["Branch C PDF CCPM"]
         c_max = self.param.p.prim.c_max
-        c_sp1 = 0.2113*c_max #TODO: cast to scalar?
-        c_sp2=0.7887*c_max #TODO
+        npts = 300
+        c_sp1 = (63 / npts) * c_max
+        c_sp2 = (237 / npts) * c_max
         
         
         c_p = variables["CCPM positive particle concentration"] 

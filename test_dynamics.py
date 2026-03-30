@@ -29,10 +29,10 @@ def sign_status(a):
 # Model / parameters
 # -----------------------------
 parameter_values = pybamm.ParameterValues("Prada2013")
-model = DFN_CCPM(initial_branch="A", source_method="flux_form")
+model = DFN_CCPM(initial_branch="A", source_method="gaussian") #flux_form
 
 experiment = pybamm.Experiment([
-    "Discharge at C/30 until 3.25V",    #3.25V
+    "Discharge at C/30 until 3.20V",    #3.25V
 ])
 
 sim = pybamm.Simulation(
@@ -45,7 +45,7 @@ sim = pybamm.Simulation(
 print("solving...")
 solution = sim.solve()
 # Save the entire simulation (includes model, params, and solution)
-sim.save("C30_325V_gaussian.pkl")
+sim.save("C30_320V_gaussian.pkl")
 
 
 
@@ -228,7 +228,7 @@ if hasattr(c_p_max, "evaluate"):
 else:
     c_p_max = float(c_p_max)
 
-theta_p_nodes = cp_nodes / c_p_max - 1e-8*c_p_max
+theta_p_nodes = cp_nodes / (c_p_max - 1e-8*c_p_max)
 
 fig2 = make_subplots(
     rows=3,
@@ -327,3 +327,101 @@ fig2.update_layout(
 )
 
 fig2.show()
+
+fig3 = make_subplots(
+    rows=3,
+    cols=1,
+    shared_xaxes=True,
+    vertical_spacing=0.08,
+    subplot_titles=x_titles,
+)
+
+# fixed colors by branch
+color_map = {
+    "R_a": "blue",
+    "R_b": "orange",
+    "R_c": "green",
+}
+
+# fixed dash by time
+dash_map = {
+    f"t = 0 {t_labels[0]}": "solid",
+    f"t = t mid{t_labels[1]}": "dash",
+    f"t = t end {t_labels[2]}": "dot",
+}
+
+legend_names = ["legend", "legend2", "legend3"]
+
+for row, (ix, xtitle, legend_name) in enumerate(zip(x_idx, x_titles, legend_names), start=1):
+    for it, lab in zip(t_idx, t_labels):
+        fig3.add_trace(
+            go.Scatter(
+                x=theta_p_nodes,
+                y=R_a[:, ix, it],
+                mode="lines",
+                name=f"R_a, {lab}",
+                legend=legend_name,
+                line=dict(color=color_map["R_a"], dash=dash_map[lab], width=2),
+            ),
+            row=row, col=1
+        )
+
+        fig3.add_trace(
+            go.Scatter(
+                x=theta_p_nodes,
+                y=R_b[:, ix, it],
+                mode="lines",
+                name=f"R_b, {lab}",
+                legend=legend_name,
+                line=dict(color=color_map["R_b"], dash=dash_map[lab], width=2),
+            ),
+            row=row, col=1
+        )
+
+        fig3.add_trace(
+            go.Scatter(
+                x=theta_p_nodes,
+                y=R_c[:, ix, it],
+                mode="lines",
+                name=f"R_c, {lab}",
+                legend=legend_name,
+                line=dict(color=color_map["R_c"], dash=dash_map[lab], width=2),
+            ),
+            row=row, col=1
+        )
+
+fig3.update_yaxes(title_text="density", row=1, col=1)
+fig3.update_yaxes(title_text="density", row=2, col=1)
+fig3.update_yaxes(title_text="density", row=3, col=1)
+fig3.update_xaxes(title_text="c_p / c_{p,max}", row=3, col=1)
+
+fig3.update_layout(
+    height=1000,
+    width=1100,
+    title="CCPM branch PDFs",
+    hovermode="x unified",
+
+    legend=dict(
+        x=1.02, y=1.00,
+        xanchor="left", yanchor="top",
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor="lightgray",
+        borderwidth=1,
+    ),
+    legend2=dict(
+        x=1.02, y=0.66,
+        xanchor="left", yanchor="top",
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor="lightgray",
+        borderwidth=1,
+    ),
+    legend3=dict(
+        x=1.02, y=0.32,
+        xanchor="left", yanchor="top",
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor="lightgray",
+        borderwidth=1,
+    ),
+)
+
+fig3.show()
