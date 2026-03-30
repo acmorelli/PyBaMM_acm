@@ -265,19 +265,27 @@ class CCPMPositiveParticle(BaseParticle):
             S_b = J_A_to_B * dB_sp1 + J_C_to_B * dB_sp2
             S_c = J_B_to_C * dC_c2
         else:
-            #  Gaussian integral scalar transfer magnitudes 
-            dA_ext = regularized_delta(c_sp1, mask_a)
-            dB_ext_c1 = regularized_delta(c1_star, mask_b)
-            dB_ext_c2 = regularized_delta(c2_star, mask_b)
-            dC_ext = regularized_delta(c_sp2, mask_c)
-            J_A_to_B = pybamm.Integral(dA_ext * g_a * pybamm.smooth_max(R_a, 0,100), c_p)
-            J_B_to_A = pybamm.Integral(dB_ext_c1 * g_b * pybamm.smooth_max(-R_b, 0,100), c_p)
-            J_B_to_C = pybamm.Integral(dB_ext_c2 * g_b * pybamm.smooth_max(R_b, 0,100), c_p)
-            J_C_to_B = pybamm.Integral(dC_ext * g_c * pybamm.smooth_max(-R_c, 0,100), c_p)
-            #only discharge A-> B -> C
-            S_a= -J_A_to_B*dA_ext
-            S_b= J_A_to_B*dB_sp1 -J_B_to_C *dB_ext_c2
-            S_c= J_B_to_C * dC_c2
+            # Integrated-divergence approach: J equals the exact FV edge
+            # flux removed from the donor by div(F)*mask (telescoping sum).
+            # Deposit-only sources; removal is already in the RHS via
+            # -div(F)*mask, so NO extraction source is needed.
+            #
+            # A: zero_flux left wall  =>  Integral(div(F_a)*mask_a) = F_a[edge 63]
+            # B: Dirichlet g=0 walls  =>  Integral(div(F_b)*mask_b) = F_b[279]-F_b[21]
+            #    (F_b[21] ≈ 0 because g_b ≈ 0 near edge 21 during discharge)
+            # No smooth_max here: it has a floor of 0.005 (sigma=(1/k)^2)
+            # which creates spurious mass. During discharge these are
+            # naturally non-negative (rightward flux at domain edges).
+            J_A_to_B = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)
+            J_B_to_C = pybamm.Integral(pybamm.div(F_b) * mask_b, c_p)
+            # Charge direction (future work)
+            J_B_to_A = pybamm.Scalar(0)
+            J_C_to_B = pybamm.Scalar(0)
+
+            # Deposit only — no extraction from donor
+            S_a = pybamm.Scalar(0) * g_a
+            S_b = J_A_to_B * dB_sp1
+            S_c = J_B_to_C * dC_c2
 
 
         return S_a, S_b, S_c, J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B
@@ -352,3 +360,4 @@ class CCPMPositiveParticle(BaseParticle):
                 f"Invalid CCPM initial_branch='{self.initial_branch}'. "
                 "Use 'A' or 'C'."
             )
+    
