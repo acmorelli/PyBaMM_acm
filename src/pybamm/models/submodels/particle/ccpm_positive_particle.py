@@ -241,48 +241,18 @@ class CCPMPositiveParticle(BaseParticle):
         dA_c1  = cell_delta(c1_star - dc)   # B->A: into cell 20 of A
         dC_c2  = cell_delta(c2_star)        # B->C: into cell 279 of C
         dB_sp2 = cell_delta(c_sp2 - dc)     # C->B: into cell 236 of B
-        if self.source_method == "flux_form":
-            # compute scalar fluxes at transition points
-            # Evaluate g and R at the transition point (cell center nearest),
-            # forming the upwind flux g * max(R, 0). Matches advection exactly.
-            J_A_to_B = (
-                pybamm.EvaluateAt(g_a, c_sp1)
-                * pybamm.smooth_max(pybamm.EvaluateAt(R_a, c_sp1), 0,100)
-            )
-            J_B_to_A = (
-                pybamm.EvaluateAt(g_b, c1_star)
-                * pybamm.smooth_max(-pybamm.EvaluateAt(R_b, c1_star), 0,100)
-            )
-            J_B_to_C = (
-                pybamm.EvaluateAt(g_b, c2_star)
-                * pybamm.smooth_max(pybamm.EvaluateAt(R_b, c2_star), 0,100)
-            )
-            J_C_to_B = (
-                pybamm.EvaluateAt(g_c, c_sp2)
-                * pybamm.smooth_max(-pybamm.EvaluateAt(R_c, c_sp2), 0,100)
-            )
 
-            S_a = J_B_to_A * dA_c1
-            S_b = J_A_to_B * dB_sp1 + J_C_to_B * dB_sp2
-            S_c = J_B_to_C * dC_c2
-        else:
-            # Integrated-divergence approach: J equals the exact FV edge
-            # flux at the transition boundary via divergence telescoping.
-            # Removal is already in the RHS via -div(F)*mask; sources only deposit.
-            #
-            # A: zero_flux left wall => Integral(div(F_a)*(c<=c_sp1)) = F_a[63]-F_a[0] = F_a[63]
-            # B: zero_flux left wall => Integral(div(F_b)*(c<=c2*))   = F_b[279]-F_b[0] = F_b[279]
-            mask_b_to_c2 = (c_p <= c2_star)  # cells 0..278
-            J_A_to_B = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)
-            J_B_to_C = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c2, c_p)
-            # Charge direction (future work)
-            J_B_to_A = pybamm.Scalar(0)
-            J_C_to_B = pybamm.Scalar(0)
+        mask_b_to_c2 = (c_p <= c2_star)  # cells 0..278
+        J_A_to_B = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)
+        J_B_to_C = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c2, c_p)
+        # Charge direction (future work)
+        J_B_to_A = pybamm.Scalar(0)
+        J_C_to_B = pybamm.Scalar(0)
 
-            # Deposit only
-            S_a = pybamm.Scalar(0) * g_a
-            S_b = J_A_to_B * dB_sp1
-            S_c = J_B_to_C * dC_c2
+        # Deposit only
+        S_a = pybamm.Scalar(0) * g_a
+        S_b = J_A_to_B * dB_sp1
+        S_c = J_B_to_C * dC_c2
 
 
         return S_a, S_b, S_c, J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B
@@ -305,40 +275,65 @@ class CCPMPositiveParticle(BaseParticle):
         g_a = variables["Branch A PDF CCPM"]
         g_b = variables["Branch B PDF CCPM"]
         g_c = variables["Branch C PDF CCPM"]
-        c_max = self.param.p.prim.c_max
-        npts = 300
-        c_sp1 = (63 / npts) * c_max
-        c_sp2 = (237 / npts) * c_max
-        
-        
-        c_p = variables["CCPM positive particle concentration"] 
-        c_init_particle=self.param.p.prim.c_init # r domain
-        # collapse to electrode (r-average), then broadcast into concentration domain
-        c_init_x = pybamm.r_average(c_init_particle) # positive electrode domain
-        variables.update({ "Initial CCPM particle concentration": c_init_x})
-
-        # Asymmetric initial PDF: Gamma(2,λ) shape ensures g(c_min)=0
-        # while keeping the mode at c_init. Avoids left-tail clipping that
-        # a symmetric Gaussian would suffer when c_init is near the boundary.
-        eps_c = pybamm.Scalar(1e-8) * c_max
+        c_max_raw = self.param.p.prim.c_max
+        eps_c = pybamm.Scalar(1e-8) * c_max_raw
         c_min_domain = eps_c
-        c_init_cp = pybamm.PrimaryBroadcast(c_init_x, "CCPM positive particle concentration")
-        # lam numerically corrected via brentq on 300-pt grid so that the
-        # discrete trapezoid mean equals c_init exactly (theta=0.0038, Prada2013).
-        # Analytical lam=(c_init-c_min)/2 gives discrete mean ~theta=0.0047 due
-        # to sub-grid resolution (c_init ≈ 1.1*dc). Corrected: lam=27.7, dc=76.3.
-        lam = pybamm.Scalar(1.3681e-3) * c_max
-        shifted = c_p - c_min_domain
-        initial_distribution_a = (
-            shifted *2* pybamm.exp(-shifted / lam) * (c_p <= c_sp1)
-        )
-        
+        c_max_domain = c_max_raw - eps_c
+
+        # Snap to exact cell edges on the truncated domain, consistent
+        # with _branch_geometry which uses c_max = c_max_raw - eps.
+        npts = 300
+        c_sp1 = pybamm.Scalar(63 / npts) * c_max_domain
+        c_sp2 = pybamm.Scalar(237 / npts) * c_max_domain
+
+        c_p = variables["CCPM positive particle concentration"]
+        c_init_particle = self.param.p.prim.c_init  # r domain
+        # collapse to electrode (r-average), then broadcast into concentration domain
+        c_init_x = pybamm.r_average(c_init_particle)  # positive electrode domain
+        variables.update({"Initial CCPM particle concentration": c_init_x})
+
+        # Regularised Dirac delta: Gamma(2,λ) anchored at the domain boundary,
+        # with compact support via branch-edge damping and Heaviside mask.
+        # g(c) ∝ (c - c_min) * (c_sp1 - c) * exp(-(c - c_min)/λ) * 𝟙(c ≤ c_sp1)
+        #
+        # Two-pass λ correction: analytical λ₀ gives biased discrete mean on
+        # coarse grids. We compute the discrete mean of the trial PDF, then
+        # rescale λ so the final discrete mean = c_init exactly.
+
+        def _build_raw_pdf_A(lam_):
+            shifted_ = c_p - c_min_domain
+            return shifted_ * (c_sp1 - c_p) * pybamm.exp(-shifted_ / lam_) * (c_p <= c_sp1)
+
+        def _build_raw_pdf_C(lam_):
+            shifted_ = c_max_domain - c_p
+            return shifted_ * (c_p - c_sp2) * pybamm.exp(-shifted_ / lam_) * (c_p >= c_sp2)
+
+        if self.initial_branch == "A":
+            lam0 = (c_init_x - c_min_domain) / 2
+            trial = _build_raw_pdf_A(lam0)
+            # discrete mean of trial PDF
+            mu_trial = pybamm.Integral(trial * c_p, c_p) / pybamm.Integral(trial, c_p)
+            # rescale λ: mean ∝ λ → λ_corrected = λ₀ * target_shift / actual_shift
+            lam = lam0 * (c_init_x - c_min_domain) / (mu_trial - c_min_domain)
+            raw_pdf = _build_raw_pdf_A(lam)
+
+        elif self.initial_branch == "C":
+            lam0 = (c_max_domain - c_init_x) / 2
+            trial = _build_raw_pdf_C(lam0)
+            mu_trial = pybamm.Integral(trial * c_p, c_p) / pybamm.Integral(trial, c_p)
+            lam = lam0 * (c_max_domain - c_init_x) / (c_max_domain - mu_trial)
+            raw_pdf = _build_raw_pdf_C(lam)
+
+        else:
+            raise ValueError(
+                f"Invalid CCPM initial_branch='{self.initial_branch}'. "
+                "Use 'A' or 'C'."
+            )
+
         # Normalize so the integral over c_p is 1 (Particle Conservation)
-        # We start with everything in Branch C for a lithiated cathode
-        # or Branch A for a delithiated one.
-        norm = pybamm.Integral(initial_distribution_a, c_p)
-        initial_pdf = initial_distribution_a / norm # normalised
-        
+        norm = pybamm.Integral(raw_pdf, c_p)
+        initial_pdf = raw_pdf / norm
+
         zero_pdf = 0 * initial_pdf
 
         if self.initial_branch == "A":
@@ -353,9 +348,4 @@ class CCPMPositiveParticle(BaseParticle):
                 g_b: zero_pdf,
                 g_c: initial_pdf,
             }
-        else:
-            raise ValueError(
-                f"Invalid CCPM initial_branch='{self.initial_branch}'. "
-                "Use 'A' or 'C'."
-            )
     
