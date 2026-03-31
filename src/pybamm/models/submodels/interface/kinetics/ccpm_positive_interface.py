@@ -32,12 +32,15 @@ class CCPMPositiveInterface(BaseKinetics):
         j_prime_p0 = pybamm.Scalar(2) #TODO: reaction rate constant in positive electrode
         c_e_init = self.param.c_e_init
         omega = pybamm.Scalar(3) #TODO self.param?? Eq 13 from Clarke2026
-        # Snapped to exact cell edges for npts=300 (edge indices 21,63,237,279)
+        # Snapped to exact cell edges on truncated domain [eps, c_p_max]
+        # Cell edge k is at: eps + k/npts * (c_p_max - eps)
         npts = 300
-        c1_star = (21 / npts) * c_p_max
-        c2_star = (279 / npts) * c_p_max
-        c_sp1 = (63 / npts) * c_p_max
-        c_sp2 = (237 / npts) * c_p_max
+        eps = 1e-8 * self.param.p.prim.c_max
+        L = c_p_max - eps
+        c1_star = eps + (21 / npts) * L
+        c2_star = eps + (279 / npts) * L
+        c_sp1 = eps + (63 / npts) * L
+        c_sp2 = eps + (237 / npts) * L
         
         # get macroscopic fields
         phi_p = variables["Positive electrode potential [V]"]
@@ -84,12 +87,14 @@ class CCPMPositiveInterface(BaseKinetics):
         R_p = self.param.p.prim.R   # or self.param.p.prim.R
         c_p= variables["CCPM positive particle concentration"]
         c_p_max = self.param.p.prim.c_max - (1e-8*self.param.p.prim.c_max )
-        # Snapped to exact cell edges for npts=300 (edge indices 21,63,237,279)
+        # Snapped to exact cell edges on truncated domain [eps, c_p_max]
         npts = 300
-        c1_star = (21 / npts) * c_p_max
-        c2_star = (279 / npts) * c_p_max
-        c_sp1 = (63 / npts) * c_p_max
-        c_sp2 = (237 / npts) * c_p_max
+        eps = 1e-8 * self.param.p.prim.c_max
+        L = c_p_max - eps
+        c1_star = eps + (21 / npts) * L
+        c2_star = eps + (279 / npts) * L
+        c_sp1 = eps + (63 / npts) * L
+        c_sp2 = eps + (237 / npts) * L
 
         beta = 3 / (F * R_p) #TODO - A/FV: spherical particles
         mask_a = (c_p <= c_sp1)

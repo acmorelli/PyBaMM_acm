@@ -76,14 +76,23 @@ class CCPMPositiveParticle(BaseParticle):
         return variables
     def _branch_geometry(self, c_p):
         eps=1e-8*self.param.p.prim.c_max 
-        c_max = self.param.p.prim.c_max -eps
+        c_min = eps                          # left edge of truncated domain
+        c_max = self.param.p.prim.c_max -eps # right edge of truncated domain
 
         # Snapped to exact cell edges for npts=300 (edge indices 21,63,237,279)
+        # Cell edge k is at: c_min + k/npts * (c_max - c_min)
+        #
+        # Original Clarke2026 θ values  →  Snapped θ (= cell edge / c_max_raw)
+        #   c1_star:  θ = 0.0709        →  21/300  = 0.0700
+        #   c_sp1:    θ = 0.2113        →  63/300  = 0.2100
+        #   c_sp2:    θ = 0.7887        →  237/300 = 0.7900
+        #   c2_star:  θ = 0.9291        →  279/300 = 0.9300
         npts = 300
-        c1_star = pybamm.Scalar(21 / npts) * c_max
-        c_sp1   = pybamm.Scalar(63 / npts) * c_max
-        c_sp2   = pybamm.Scalar(237 / npts) * c_max
-        c2_star = pybamm.Scalar(279 / npts) * c_max
+        L = c_max - c_min  # domain length
+        c1_star = c_min + pybamm.Scalar(21 / npts) * L
+        c_sp1   = c_min + pybamm.Scalar(63 / npts) * L
+        c_sp2   = c_min + pybamm.Scalar(237 / npts) * L
+        c2_star = c_min + pybamm.Scalar(279 / npts) * L
 
         # same boolean-mask style you already used
         mask_a = (c_p <= c_sp1)
@@ -243,15 +252,27 @@ class CCPMPositiveParticle(BaseParticle):
         dB_sp2 = cell_delta(c_sp2 - dc)     # C->B: into cell 236 of B
 
         mask_b_to_c2 = (c_p <= c2_star)  # cells 0..278
-        J_A_to_B = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)
-        J_B_to_C = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c2, c_p)
-        # Charge direction (future work)
-        J_B_to_A = pybamm.Scalar(0)
-        J_C_to_B = pybamm.Scalar(0)
+        mask_b_to_c1= (c_p >= c1_star)  # cells 21..299
+        mask_c_to_b =(c_p >= c_sp2)  # cells 237..299
+
+        # Raw telescoped fluxes at each transition edge
+        J_A_to_B_raw = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)       # = F_a(c_sp1)
+        J_B_to_C_raw = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c2, c_p) # = F_b(c2_star)
+        J_B_to_A_raw = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c1, c_p) # = -F_b(c1_star)
+        J_C_to_B_raw = pybamm.Integral(pybamm.div(F_c) * mask_c_to_b, c_p)  # = -F_c(c_sp2)
+
+        # Heaviside gating via pybamm.sigmoid: only allow transfer when flux
+        # direction is outward from the sending branch (Clarke2026 Eq 18-20).
+        # pybamm.sigmoid(0, x, k) ≈ H(x) = (1 + tanh(k*x)) / 2
+        k_sig = 1e4
+        J_A_to_B = J_A_to_B_raw * pybamm.sigmoid(0, J_A_to_B_raw, k_sig)
+        J_B_to_C = J_B_to_C_raw * pybamm.sigmoid(0, J_B_to_C_raw, k_sig)
+        J_B_to_A = J_B_to_A_raw * pybamm.sigmoid(0, J_B_to_A_raw, k_sig)
+        J_C_to_B = J_C_to_B_raw * pybamm.sigmoid(0, J_C_to_B_raw, k_sig)
 
         # Deposit only
-        S_a = pybamm.Scalar(0) * g_a
-        S_b = J_A_to_B * dB_sp1
+        S_a = J_B_to_A * dA_c1 
+        S_b = J_A_to_B * dB_sp1 + J_C_to_B * dB_sp2
         S_c = J_B_to_C * dC_c2
 
 
@@ -265,10 +286,10 @@ class CCPMPositiveParticle(BaseParticle):
         self.boundary_conditions = {
             # Physical walls use "zero_flux": ghost nodes for upwind stencil,
             # but divergence zeros the boundary flux → true zero-flux wall.
-            # Transition boundaries use standard "Dirichlet" g=0.
-            g_a: {"left": (zero, "zero_flux"), "right": (zero, "Dirichlet")},
-            g_b: {"left": (zero, "zero_flux"), "right": (zero, "Dirichlet")},
-            g_c: {"left": (zero, "Dirichlet"), "right": (zero, "zero_flux")},
+
+            g_a: {"left": (zero, "zero_flux"), "right": (zero, "zero_flux")},
+            g_b: {"left": (zero, "zero_flux"), "right": (zero, "zero_flux")},
+            g_c: {"left": (zero, "zero_flux"), "right": (zero, "zero_flux")},
         }
     
     def set_initial_conditions(self, variables):
@@ -281,10 +302,11 @@ class CCPMPositiveParticle(BaseParticle):
         c_max_domain = c_max_raw - eps_c
 
         # Snap to exact cell edges on the truncated domain, consistent
-        # with _branch_geometry which uses c_max = c_max_raw - eps.
+        # with _branch_geometry: edge k = c_min + k/npts * (c_max - c_min)
         npts = 300
-        c_sp1 = pybamm.Scalar(63 / npts) * c_max_domain
-        c_sp2 = pybamm.Scalar(237 / npts) * c_max_domain
+        L = c_max_domain - c_min_domain
+        c_sp1 = c_min_domain + pybamm.Scalar(63 / npts) * L
+        c_sp2 = c_min_domain + pybamm.Scalar(237 / npts) * L
 
         c_p = variables["CCPM positive particle concentration"]
         c_init_particle = self.param.p.prim.c_init  # r domain
@@ -304,9 +326,11 @@ class CCPMPositiveParticle(BaseParticle):
             shifted_ = c_p - c_min_domain
             return shifted_ * (c_sp1 - c_p) * pybamm.exp(-shifted_ / lam_) * (c_p <= c_sp1)
 
-        def _build_raw_pdf_C(lam_):
-            shifted_ = c_max_domain - c_p
-            return shifted_ * (c_p - c_sp2) * pybamm.exp(-shifted_ / lam_) * (c_p >= c_sp2)
+        def _build_raw_pdf_C(mu_, sigma_):
+            """Tight Gaussian (Dirac-delta approximation) centred on mu_.
+            g(c) ∝ exp(-(c - μ)²/(2σ²))  with σ ~ 2·dc so it becomes
+            zero within a few cells of c_init."""
+            return pybamm.exp(-((c_p - mu_) ** 2) / (2 * sigma_ ** 2))
 
         if self.initial_branch == "A":
             lam0 = (c_init_x - c_min_domain) / 2
@@ -318,11 +342,11 @@ class CCPMPositiveParticle(BaseParticle):
             raw_pdf = _build_raw_pdf_A(lam)
 
         elif self.initial_branch == "C":
-            lam0 = (c_max_domain - c_init_x) / 2
-            trial = _build_raw_pdf_C(lam0)
-            mu_trial = pybamm.Integral(trial * c_p, c_p) / pybamm.Integral(trial, c_p)
-            lam = lam0 * (c_max_domain - c_init_x) / (c_max_domain - mu_trial)
-            raw_pdf = _build_raw_pdf_C(lam)
+            # Tight Gaussian approximating a Dirac delta at c_init.
+            # σ = 2·dc  →  becomes zero ~4-5 cells from c_init.
+            dc = L / npts
+            sigma = 2 * dc
+            raw_pdf = _build_raw_pdf_C(c_init_x, sigma)
 
         else:
             raise ValueError(
