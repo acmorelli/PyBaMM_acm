@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pybamm
 
-PICKLE_FILE = r"C:\Users\dottavianomo\programming\ccpm_snap_mesh_Ra_smooth\1C_100s_gaussian.pkl"
+PICKLE_FILE = r"C:\Users\dottavianomo\programming\ccpm_snap_mesh_Ra_smooth\c30_210V_gaussian.pkl"
 
 with open(PICKLE_FILE, "rb") as f:
     sim = pickle.load(f)
@@ -63,12 +63,14 @@ def eval_coupled_var(name):
     return np.squeeze(raw).reshape((n_cp, n_x, n_t), order="F")
 
 print("Computing lithiation rates (this may take a moment)...")
-R_a = eval_coupled_var("CCPM Branch A lithiation rate")
-R_b = eval_coupled_var("CCPM Branch B lithiation rate")
-R_c = eval_coupled_var("CCPM Branch C lithiation rate")
-
+#R_a = eval_coupled_var("CCPM Branch A lithiation rate")
+#R_b = eval_coupled_var("CCPM Branch B lithiation rate")
+#R_c = eval_coupled_var("CCPM Branch C lithiation rate")
+R_a=0
+R_b=0
+R_c=0
 print(f"m_a shape: {m_a.shape}, m_tot range: [{m_tot.min():.6f}, {m_tot.max():.6f}]")
-print(f"R_a shape: {R_a.shape}")
+#print(f"R_a shape: {R_a.shape}")
 
 
 
@@ -233,6 +235,7 @@ fig2.update_layout(height=900, width=1000, title="CCPM branch masses vs time")
 fig2.show()
 
 ################
+"""
 # --- Figure 3: Lithiation rates R_a, R_b, R_c vs c_p (per x-location) ---
 fig3 = make_subplots(
     rows=3,
@@ -279,3 +282,4 @@ fig3.update_layout(
     legend3=dict(x=1.02, y=0.32, xanchor="left", yanchor="top"),
 )
 fig3.show()
+"""

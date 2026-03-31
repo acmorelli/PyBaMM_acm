@@ -445,6 +445,13 @@ class Symbol:
                 )
         return domains
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.set_id()
+        # Clear cached shape so it's recomputed with the current process's
+        # hash seed (domain_size uses hash() for non-standard domains).
+        self.__dict__.pop("_saved_evaluate_for_shape", None)
+
     @property
     def id(self):
         return self._id

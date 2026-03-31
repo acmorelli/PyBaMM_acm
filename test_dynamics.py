@@ -29,10 +29,12 @@ def sign_status(a):
 # Model / parameters
 # -----------------------------
 parameter_values = pybamm.ParameterValues("Prada2013")
+#parameter_values.set_initial_state(0.85)
 model = DFN_CCPM(initial_branch="A", source_method="gaussian") #flux_form
-
+# mode fast instead of safe in the solver
+# timesteps 
 experiment = pybamm.Experiment([
-    "Discharge at C/30 until 3.20V",    #3.25V
+    "Discharge at C/30 until 2.10V",    #3.25V
 ])
 
 sim = pybamm.Simulation(
@@ -45,7 +47,7 @@ sim = pybamm.Simulation(
 print("solving...")
 solution = sim.solve()
 # Save the entire simulation (includes model, params, and solution)
-sim.save("C30_320V_gaussian.pkl")
+sim.save("C30_210V_gaussian.pkl")
 
 
 
@@ -345,9 +347,9 @@ color_map = {
 
 # fixed dash by time
 dash_map = {
-    f"t = 0 {t_labels[0]}": "solid",
-    f"t = t mid{t_labels[1]}": "dash",
-    f"t = t end {t_labels[2]}": "dot",
+    "t = 0": "solid",
+    f"t = mid {t_idx[1]}": "dash",
+    f"t = end {t_idx[2]}": "dot",
 }
 
 legend_names = ["legend", "legend2", "legend3"]

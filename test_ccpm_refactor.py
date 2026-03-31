@@ -28,6 +28,10 @@ print("Solving …")
 sol = sim.solve()
 print("Done.")
 
+# ── Save solution ──────────────────────────────────────────────────────────────
+sim.save(f"{PICKLE_PATH}")
+print(f"Solution saved to {PICKLE_PATH}")
+
 # ── Extract ────────────────────────────────────────────────────────────────────
 time  = sol["Time [s]"].entries
 V     = sol["Voltage [V]"].entries
@@ -47,10 +51,8 @@ J_CB  = sol["Branch C to B scalar flux"].entries
 S_err = sol["CCPM source mass balance error"].entries  # should be ~0
 
 # X-averaged PDFs: shape (n_cp, n_t) or (n_cp,) for scalar time
-# Use the solution variable to get cp nodes (avoids mesh recursion bug)
+cp = sim.mesh["CCPM positive particle concentration"].nodes
 c_max = float(param["Maximum concentration in positive electrode [mol.m-3]"])
-cp_raw = np.asarray(sol["CCPM positive particle concentration"].entries).squeeze()
-cp = cp_raw[:, 0] if cp_raw.ndim > 1 else cp_raw  # node coords, constant in time
 c1_star = 0.0710 * c_max;  c_sp1 = 0.2113 * c_max
 c_sp2   = 0.7887 * c_max;  c2_star = 0.9290 * c_max
 
@@ -65,19 +67,6 @@ n_cp = len(cp)
 gA = squeeze2d(sol["X-averaged Branch A PDF CCPM"].entries, n_cp)
 gB = squeeze2d(sol["X-averaged Branch B PDF CCPM"].entries, n_cp)
 gC = squeeze2d(sol["X-averaged Branch C PDF CCPM"].entries, n_cp)
-
-# ── Save solution (numpy arrays only — sol/sim hold mesh refs and cannot be pickled) ──
-with open(PICKLE_PATH, "wb") as f:
-    pickle.dump({
-        "time": time, "V": V, "theta": theta,
-        "m_a": m_a, "m_b": m_b, "m_c": m_c, "m_tot": m_tot,
-        "J_AB": J_AB, "J_BA": J_BA, "J_BC": J_BC, "J_CB": J_CB,
-        "S_err": S_err,
-        "gA": gA, "gB": gB, "gC": gC, "cp": cp,
-        "c_max": c_max, "c1_star": c1_star, "c_sp1": c_sp1,
-        "c_sp2": c_sp2, "c2_star": c2_star,
-    }, f)
-print(f"Solution saved to {PICKLE_PATH}")
 
 # ── Print diagnostics ──────────────────────────────────────────────────────────
 print(f"\n{'='*65}")

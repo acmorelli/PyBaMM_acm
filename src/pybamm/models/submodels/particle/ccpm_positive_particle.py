@@ -270,16 +270,16 @@ class CCPMPositiveParticle(BaseParticle):
             # flux at the transition boundary via divergence telescoping.
             # Removal is already in the RHS via -div(F)*mask; sources only deposit.
             #
-            # A: zero_flux left wall => Integral(div(F_a)*mask_a) = F_a[edge 63]
-            # B: single-cell deposit at cell 63 => g_b never reaches cell 21
-            #    => F_b[21]=0 => Integral(div(F_b)*mask_b) = F_b[edge 279]
+            # A: zero_flux left wall => Integral(div(F_a)*(c<=c_sp1)) = F_a[63]-F_a[0] = F_a[63]
+            # B: zero_flux left wall => Integral(div(F_b)*(c<=c2*))   = F_b[279]-F_b[0] = F_b[279]
+            mask_b_to_c2 = (c_p <= c2_star)  # cells 0..278
             J_A_to_B = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)
-            J_B_to_C = pybamm.Integral(pybamm.div(F_b) * mask_b, c_p)
+            J_B_to_C = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c2, c_p)
             # Charge direction (future work)
             J_B_to_A = pybamm.Scalar(0)
             J_C_to_B = pybamm.Scalar(0)
 
-            # Deposit only — no extraction from donor
+            # Deposit only
             S_a = pybamm.Scalar(0) * g_a
             S_b = J_A_to_B * dB_sp1
             S_c = J_B_to_C * dC_c2
@@ -297,7 +297,7 @@ class CCPMPositiveParticle(BaseParticle):
             # but divergence zeros the boundary flux → true zero-flux wall.
             # Transition boundaries use standard "Dirichlet" g=0.
             g_a: {"left": (zero, "zero_flux"), "right": (zero, "Dirichlet")},
-            g_b: {"left": (zero, "Dirichlet"), "right": (zero, "Dirichlet")},
+            g_b: {"left": (zero, "zero_flux"), "right": (zero, "Dirichlet")},
             g_c: {"left": (zero, "Dirichlet"), "right": (zero, "zero_flux")},
         }
     
