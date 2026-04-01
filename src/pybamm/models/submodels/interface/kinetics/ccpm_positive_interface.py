@@ -28,8 +28,8 @@ class CCPMPositiveInterface(BaseKinetics):
         # Physical constants and parameters
         F = pybamm.constants.F
         R = pybamm.constants.R   
-        U_eq_p0 = pybamm.Scalar(3.42) #self.param.p.U_ref  # scalar 3.42V for LFP (Clarke2026)     #TODO
-        j_prime_p0 = pybamm.Scalar(2) #TODO: reaction rate constant in positive electrode
+        U_eq_p0 = pybamm.Scalar(3.397) #3.42 b#3.397 #self.param.p.U_ref  # scalar 3.42V for LFP (Clarke2026)     #TODO
+        j_prime_p0 = pybamm.Scalar(0.948) # 2 #0.948 #TODO: reaction rate constant in positive electrode
         c_e_init = self.param.c_e_init
         omega = pybamm.Scalar(3) #TODO self.param?? Eq 13 from Clarke2026
         # Snapped to exact cell edges on truncated domain [eps, c_p_max]
