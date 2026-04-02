@@ -13,10 +13,10 @@ class DFN_CCPM(DFN):
         name="Doyle-Fuller-Newman CCPM model",
         build=True,
         initial_branch="A",
-        source_method="flux_form",
+        mode="discharge",
     ):
         self.initial_branch = initial_branch.upper()
-        self.source_method = source_method
+        self.mode = mode
         super().__init__(options=options, name=name, build=build)
 
     @property
@@ -64,7 +64,7 @@ class DFN_CCPM(DFN):
             options=self.options,
             phase="primary",
             initial_branch=self.initial_branch,
-            source_method=self.source_method,
+            mode=self.mode,
         )
 
     def set_open_circuit_potential_submodel(self):

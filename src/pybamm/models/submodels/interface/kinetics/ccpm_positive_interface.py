@@ -48,18 +48,23 @@ class CCPMPositiveInterface(BaseKinetics):
         T_p = variables["Positive electrode temperature [K]"]
         c_e = variables["Positive electrolyte concentration [mol.m-3]"]
         
-        # broadcast x-domain to the concentration grid (make it available for every c point)
-        phi_e_broadcast=pybamm.PrimaryBroadcast(phi_e, "CCPM positive particle concentration")
-        phi_p_broadcast = pybamm.PrimaryBroadcast(phi_p, "CCPM positive particle concentration" )
+        # Compute the overpotential η = φ_s − φ_e − U_eq_p0 at macroscopic level
+        # BEFORE broadcasting.  η is O(0.01 V), whereas φ_s − φ_e alone is
+        # O(3.4 V); broadcasting the difference avoids catastrophic cancellation
+        # when F·(φ_s − φ_e)/(2RT) ≈ 66 is subtracted from F·U_eq_p0/(2RT) ≈ 66
+        # inside the sinh argument (the result is O(1e-4)).
+        eta = phi_p - phi_e - U_eq_p0          # macroscopic, O(0.01 V)
+
+        # broadcast x-domain quantities to the concentration grid
+        eta_broadcast = pybamm.PrimaryBroadcast(eta, "CCPM positive particle concentration")
         T_p_broadcast = pybamm.PrimaryBroadcast(T_p, "CCPM positive particle concentration")
-        c_e_broadcast= pybamm.PrimaryBroadcast(c_e, "CCPM positive particle concentration")
+        c_e_broadcast = pybamm.PrimaryBroadcast(c_e, "CCPM positive particle concentration")
         
-        # calculate branch specfic current j_tr_branchName on the c-grid
-        # for this, we define the chemical potential as a function of the spatial variable c_p
-        mu= R*T_p_broadcast * ( pybamm.log(c_p/(c_p_max-c_p)) + omega*(1-(2*theta_p)))
+        # chemical potential on the c-grid (single-phase branches A and C)
+        mu = R * T_p_broadcast * (pybamm.log(c_p / (c_p_max - c_p)) + omega * (1 - (2 * theta_p)))
         common_factor = j_prime_p0 * (c_e_broadcast / c_e_init) ** 0.5
-        overpotential_term_singlePhase = (F * (phi_p_broadcast - phi_e_broadcast) - F * U_eq_p0 + mu) / (2 * R * T_p_broadcast)
-        overpotential_term_mixedPhase= (F * (phi_p_broadcast - phi_e_broadcast) - F * U_eq_p0) / (2 * R * T_p_broadcast)
+        overpotential_term_singlePhase = (F * eta_broadcast + mu) / (2 * R * T_p_broadcast)
+        overpotential_term_mixedPhase  = (F * eta_broadcast)       / (2 * R * T_p_broadcast)
         
         # signal: from particle to electrolyte, so positive j means lithium leaving the particle (delithiation)
         j_tr_a = common_factor * (c_p / c_p_max) ** 0.5 * (1-(c_p/c_p_max))**0.5 * pybamm.sinh(overpotential_term_singlePhase)
@@ -85,25 +90,17 @@ class CCPMPositiveInterface(BaseKinetics):
         j_tr_a, j_tr_b, j_tr_c, j_tot = self._get_ccpm_currents(variables)
         F = pybamm.constants.F
         R_p = self.param.p.prim.R   # or self.param.p.prim.R
-        c_p= variables["CCPM positive particle concentration"]
-        c_p_max = self.param.p.prim.c_max - (1e-8*self.param.p.prim.c_max )
-        # Snapped to exact cell edges on truncated domain [eps, c_p_max]
-        npts = 300
-        eps = 1e-8 * self.param.p.prim.c_max
-        L = c_p_max - eps
-        c1_star = eps + (21 / npts) * L
-        c2_star = eps + (279 / npts) * L
-        c_sp1 = eps + (63 / npts) * L
-        c_sp2 = eps + (237 / npts) * L
 
         beta = 3 / (F * R_p) #TODO - A/FV: spherical particles
-        mask_a = (c_p <= c_sp1)
-        mask_b = (c1_star <= c_p) * (c_p <= c2_star)
-        mask_c = (c_sp2 <= c_p)
 
-        R_a = -beta * j_tr_a * mask_a
-        R_b = -beta * j_tr_b *mask_b
-        R_c = -beta * j_tr_c *mask_c
+        # Do NOT mask R here — the mask would zero R at the transition
+        # boundary cell, and PyBaMM's node-to-edge averaging would halve
+        # R at the critical edge where mass exits the branch.
+        # The branch confinement is enforced via mask_a/b/c on the RHS
+        # (in ccpm_positive_particle.py), not on R.
+        R_a = -beta * j_tr_a
+        R_b = -beta * j_tr_b
+        R_c = -beta * j_tr_c
 
         return j_tr_a, j_tr_b, j_tr_c, j_tot, R_a, R_b, R_c
     

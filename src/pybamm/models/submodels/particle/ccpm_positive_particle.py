@@ -19,7 +19,7 @@ class CCPMPositiveParticle(BaseParticle):
         options=None,
         phase="primary",
         initial_branch="A",
-        source_method='gaussian'
+        mode='discharge'
 
     ):
         super().__init__(
@@ -32,7 +32,7 @@ class CCPMPositiveParticle(BaseParticle):
         
         self.c_p_space = pybamm.standard_spatial_vars.c_p
         self.initial_branch = initial_branch.upper()
-        self.source_method = source_method
+        self.mode = mode
         
     def get_fundamental_variables(self):
         # 1. Define the 3 PDFs as state variables (Differential Variables)
@@ -241,40 +241,41 @@ class CCPMPositiveParticle(BaseParticle):
             self._branch_geometry(c_p)
         )
         g_a = variables["Branch A PDF CCPM"]
-        g_b = variables["Branch B PDF CCPM"]
         g_c = variables["Branch C PDF CCPM"]
-        R_a = variables["CCPM Branch A lithiation rate"]
-        R_b = variables["CCPM Branch B lithiation rate"]
-        R_c = variables["CCPM Branch C lithiation rate"]
-        dB_sp1 = cell_delta(c_sp1)          # A->B: into cell 63 of B
-        dA_c1  = cell_delta(c1_star - dc)   # B->A: into cell 20 of A
-        dC_c2  = cell_delta(c2_star)        # B->C: into cell 279 of C
-        dB_sp2 = cell_delta(c_sp2 - dc)     # C->B: into cell 236 of B
 
         mask_b_to_c2 = (c_p <= c2_star)  # cells 0..278
-        mask_b_to_c1= (c_p >= c1_star)  # cells 21..299
-        mask_c_to_b =(c_p >= c_sp2)  # cells 237..299
+        mask_b_to_c1 = (c_p >= c1_star)  # cells 21..299
+        mask_c_to_b = (c_p >= c_sp2)  # cells 237..299
 
-        # Raw telescoped fluxes at each transition edge
-        J_A_to_B_raw = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)       # = F_a(c_sp1)
-        J_B_to_C_raw = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c2, c_p) # = F_b(c2_star)
-        J_B_to_A_raw = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c1, c_p) # = -F_b(c1_star)
-        J_C_to_B_raw = pybamm.Integral(pybamm.div(F_c) * mask_c_to_b, c_p)  # = -F_c(c_sp2)
+        # Default all fluxes to zero; only the active direction is computed
+        J_A_to_B = pybamm.Scalar(0)
+        J_B_to_A = pybamm.Scalar(0)
+        J_B_to_C = pybamm.Scalar(0)
+        J_C_to_B = pybamm.Scalar(0)
 
-        # Heaviside gating via pybamm.sigmoid: only allow transfer when flux
-        # direction is outward from the sending branch (Clarke2026 Eq 18-20).
-        # pybamm.sigmoid(0, x, k) ≈ H(x) = (1 + tanh(k*x)) / 2
-        k_sig = 1e4
-        J_A_to_B = J_A_to_B_raw * pybamm.sigmoid(0, J_A_to_B_raw, k_sig)
-        J_B_to_C = J_B_to_C_raw * pybamm.sigmoid(0, J_B_to_C_raw, k_sig)
-        J_B_to_A = J_B_to_A_raw * pybamm.sigmoid(0, J_B_to_A_raw, k_sig)
-        J_C_to_B = J_C_to_B_raw * pybamm.sigmoid(0, J_C_to_B_raw, k_sig)
+        if self.mode == "discharge":
+            # A -> B -> C
+            dB_sp1 = cell_delta(c_sp1)          # A->B: into cell 63 of B
+            dC_c2  = cell_delta(c2_star)        # B->C: into cell 279 of C
+            J_A_to_B = pybamm.Integral(pybamm.div(F_a) * mask_a, c_p)       # = F_a(c_sp1)
+            J_B_to_C = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c2, c_p) # = F_b(c2_star)
 
-        # Deposit only
-        S_a = J_B_to_A * dA_c1 
-        S_b = J_A_to_B * dB_sp1 + J_C_to_B * dB_sp2
-        S_c = J_B_to_C * dC_c2
+            S_a = pybamm.Scalar(0) * g_a
+            S_b = J_A_to_B * dB_sp1
+            S_c = J_B_to_C * dC_c2
 
+        elif self.mode == "charge":
+            dA_c1  = cell_delta(c1_star - dc)   # B->A: into cell 20 of A
+            dB_sp2 = cell_delta(c_sp2 - dc)     # C->B: into cell 236 of B
+            J_B_to_A = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c1, c_p) # = -F_b(c1_star)
+            J_C_to_B = pybamm.Integral(pybamm.div(F_c) * mask_c_to_b, c_p)  # = -F_c(c_sp2)
+
+            S_a = J_B_to_A * dA_c1
+            S_b = J_C_to_B * dB_sp2
+            S_c = pybamm.Scalar(0) * g_c
+
+        else:
+            raise ValueError(f"Unknown mode '{self.mode}', expected 'discharge' or 'charge'")
 
         return S_a, S_b, S_c, J_A_to_B, J_B_to_A, J_B_to_C, J_C_to_B
     

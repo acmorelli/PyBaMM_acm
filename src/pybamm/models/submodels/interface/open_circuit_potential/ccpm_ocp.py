@@ -33,7 +33,7 @@ class CCPMOpenCircuitPotential(BaseOpenCircuitPotential):
         # Physical constants
         F = pybamm.constants.F
         R = pybamm.constants.R
-        U_eq_p0 = pybamm.Scalar(3.42)  # V, LFP plateau reference
+        U_eq_p0 = pybamm.Scalar(3.397)  # V, LFP plateau reference
         omega = pybamm.Scalar(3)  # regular solution parameter
 
         # Effective OCP: U_eq_eff = U_eq_p0 - μ_p(θ)/F
