@@ -14,9 +14,9 @@ def arr(sol, name):
 
 
 # ── Model / solve ──────────────────────────────────────────────────────
-model = DFN_CCPM(initial_branch="A", source_method="gaussian")
+model = DFN_CCPM(initial_branch="A", mode="discharge")
 param = pybamm.ParameterValues("Prada2013")
-experiment = pybamm.Experiment(["Discharge at C/30 until 2.10V"])
+experiment = pybamm.Experiment(["Discharge at C/30 until 3.18V"])
 
 sim = pybamm.Simulation(
     model,
@@ -26,9 +26,14 @@ sim = pybamm.Simulation(
 )
 
 print("solving...")
-solution = sim.solve()
+pybamm.set_logging_level("INFO") 
+try:
+    solution = sim.solve() #1911
+except Exception as e:
+    print(f"Solver failed: {e}")
+    import traceback; traceback.print_exc()
 print("done.\n")
-sim.save("C30_210V_gaussian.pkl") #start1705
+sim.save("C30_318V_modeDch_smallerRadius.pkl") #start1357
 # ── Extract arrays ─────────────────────────────────────────────────────
 time = solution["Time [s]"].entries
 
@@ -54,7 +59,13 @@ jtr_b = arr(solution, "CCPM Branch B interfacial current density [A.m-2]")
 jtr_c = arr(solution, "CCPM Branch C interfacial current density [A.m-2]")
 
 J_AB = arr(solution, "Branch A to B scalar flux")
+J_BA = arr(solution, "Branch B to A scalar flux")
 J_BC = arr(solution, "Branch B to C scalar flux")
+J_CB = arr(solution, "Branch C to B scalar flux")
+
+# Positive electrode OCP (from CCPM OCP submodel)
+ocp_pos = arr(solution, "Positive electrode open-circuit potential [V]")
+ocp_pos_avg = arr(solution, "X-averaged positive electrode open-circuit potential [V]")
 
 
 # ── Console diagnostics ────────────────────────────────────────────────
@@ -72,17 +83,19 @@ for frac in np.linspace(0, 1, 11):
     i = min(int(frac * (n - 1)), n - 1)
     jab = np.mean(J_AB[:, i]) if J_AB.ndim > 1 else J_AB[i]
     jbc = np.mean(J_BC[:, i]) if J_BC.ndim > 1 else J_BC[i]
+    jba = np.mean(J_BA[:, i]) if J_BA.ndim > 1 else J_BA[i]
+    jcb = np.mean(J_CB[:, i]) if J_CB.ndim > 1 else J_CB[i]
     print(
         f"  t={time[i]:7.0f}s  V={voltage[i]:.4f}  theta={theta_ccpm[i]:.6f}"
         f"  mA={m_a[i]:.6f}  mB={m_b[i]:.4e}  mC={m_c[i]:.4e}"
-        f"  J_AB={jab:+.3e}  J_BC={jbc:+.3e}"
+        f"  J_AB={jab:+.3e}  J_BA={jba:+.3e}  J_BC={jbc:+.3e}  J_CB={jcb:+.3e}"
     )
 print()
 
 # ── Figure 1: Time-series (masses, theta, voltage, J fluxes) ──────────
 fig1 = make_subplots(
-    rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.06,
-    subplot_titles=("Branch masses", "CCPM stoichiometry", "Terminal voltage", "Transition fluxes J_AB, J_BC"),
+    rows=5, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+    subplot_titles=("Branch masses", "CCPM stoichiometry", "Terminal voltage", "Positive electrode OCP", "Transition fluxes J_AB, J_BC"),
 )
 
 fig1.add_trace(go.Scatter(x=time, y=m_a, mode="lines", name="m_a"), row=1, col=1)
@@ -94,20 +107,26 @@ fig1.add_trace(go.Scatter(x=time, y=theta_ccpm, mode="lines", name="theta_ccpm")
 
 fig1.add_trace(go.Scatter(x=time, y=voltage, mode="lines", name="Voltage [V]"), row=3, col=1)
 
-j_ab_t = np.mean(J_AB, axis=0) if J_AB.ndim > 1 else J_AB
-j_bc_t = np.mean(J_BC, axis=0) if J_BC.ndim > 1 else J_BC
-fig1.add_trace(go.Scatter(x=time, y=j_ab_t, mode="lines", name="J_AB"), row=4, col=1)
-fig1.add_trace(go.Scatter(x=time, y=j_bc_t, mode="lines", name="J_BC"), row=4, col=1)
+fig1.add_trace(go.Scatter(x=time, y=ocp_pos_avg, mode="lines", name="OCP [V]"), row=4, col=1)
 
-fig1.update_xaxes(title_text="Time [s]", row=4, col=1)
+def _mean_or_1d(a):
+    return np.mean(a, axis=0) if a.ndim > 1 else a
+
+fig1.add_trace(go.Scatter(x=time, y=_mean_or_1d(J_AB), mode="lines", name="J_AB"), row=5, col=1)
+fig1.add_trace(go.Scatter(x=time, y=_mean_or_1d(J_BA), mode="lines", name="J_BA"), row=5, col=1)
+fig1.add_trace(go.Scatter(x=time, y=_mean_or_1d(J_BC), mode="lines", name="J_BC"), row=5, col=1)
+fig1.add_trace(go.Scatter(x=time, y=_mean_or_1d(J_CB), mode="lines", name="J_CB"), row=5, col=1)
+
+fig1.update_xaxes(title_text="Time [s]", row=5, col=1)
 fig1.update_yaxes(title_text="mass", row=1, col=1)
 fig1.update_yaxes(title_text="theta", row=2, col=1)
 fig1.update_yaxes(title_text="V", row=3, col=1)
-fig1.update_yaxes(title_text="J [1/s]", row=4, col=1)
+fig1.update_yaxes(title_text="OCP [V]", row=4, col=1)
+fig1.update_yaxes(title_text="J [1/s]", row=5, col=1)
 
-fig1.update_layout(height=1000, width=1100, hovermode="x unified",
+fig1.update_layout(height=1200, width=1100, hovermode="x unified",
                    legend_title="Click traces to hide/show",
-                   title="C/10 discharge to 3.20V — time series")
+                   title="C/30 discharge to 3.20V — time series")
 fig1.show()
 
 # ── Figure 2: Spatial dropdown plot (g_a, g_b, g_c, R_a, R_b, R_c, j_tr) ─
@@ -177,6 +196,8 @@ var_names = list(var_catalog.keys())
 n_time_snaps = len(t_idx)
 n_traces_per_var = 3 * n_time_snaps  # 3 x-locations * n time snapshots
 
+legend_names = ["legend", "legend2", "legend3"]
+
 for v_idx, (vname, data) in enumerate(var_catalog.items()):
     for row, ix in enumerate(x_idx, start=1):
         for it_i, (it, tlab) in enumerate(zip(t_idx, t_labels)):
@@ -186,8 +207,10 @@ for v_idx, (vname, data) in enumerate(var_catalog.items()):
                     y=data[:, ix, it],
                     mode="lines",
                     name=tlab,
-                    showlegend=(row == 1 and v_idx == 0),
+                    legendgroup=f"row{row}_{tlab}",
+                    showlegend=(v_idx == 0),
                     visible=(v_idx == 0),
+                    legend=legend_names[row - 1],
                     line=dict(color=color_t[it_i], dash=dash_t[it_i], width=2),
                 ),
                 row=row, col=1,
@@ -202,7 +225,7 @@ for v_idx, vname in enumerate(var_names):
     for vi in range(len(var_names)):
         for row in range(3):
             for it_i in range(n_time_snaps):
-                showlegends.append(row == 0 and vi == v_idx)
+                showlegends.append(vi == v_idx)
     buttons.append(dict(
         label=vname,
         method="update",
@@ -220,6 +243,18 @@ fig2.update_layout(
     height=1000, width=1100,
     title=f"CCPM spatial profiles: {var_names[0]}",
     hovermode="x unified",
+    legend=dict(
+        title=x_titles[0],
+        yanchor="top", y=1.0, xanchor="left", x=1.02,
+    ),
+    legend2=dict(
+        title=x_titles[1],
+        yanchor="top", y=0.63, xanchor="left", x=1.02,
+    ),
+    legend3=dict(
+        title=x_titles[2],
+        yanchor="top", y=0.30, xanchor="left", x=1.02,
+    ),
 )
 
 fig2.update_xaxes(title_text="c_p / c_p_max", row=3, col=1)
@@ -227,3 +262,70 @@ for r in range(1, 4):
     fig2.update_yaxes(title_text="value", row=r, col=1)
 
 fig2.show()
+
+# ── Figure 3: x-resolved time series (OCP, J_AB, J_BA, J_BC, J_CB) ──────
+# These variables have shape [n_x, n_t] — plot at 3 x-locations.
+
+def reshape_x(flat):
+    """Reshape [n_x, n_t] or scalar-over-time to [n_x, n_t]."""
+    flat = np.squeeze(flat)
+    if flat.ndim == 1:  # scalar (x-averaged), broadcast
+        return np.tile(flat, (n_x, 1))
+    return flat  # already [n_x, n_t]
+
+ocp_xt = reshape_x(ocp_pos)
+JAB_xt = reshape_x(J_AB)
+JBA_xt = reshape_x(J_BA)
+JBC_xt = reshape_x(J_BC)
+JCB_xt = reshape_x(J_CB)
+
+xvar_catalog = {
+    "OCP [V]": ocp_xt,
+    "J_AB (A→B)": JAB_xt,
+    "J_BA (B→A)": JBA_xt,
+    "J_BC (B→C)": JBC_xt,
+    "J_CB (C→B)": JCB_xt,
+}
+
+colors_x = ["blue", "orange", "green"]
+fig3 = go.Figure()
+
+xvar_names = list(xvar_catalog.keys())
+n_x_locs = len(x_idx)
+n_traces_per_xvar = n_x_locs
+
+for vi, (vname, data) in enumerate(xvar_catalog.items()):
+    for xi_i, ix in enumerate(x_idx):
+        fig3.add_trace(go.Scatter(
+            x=time, y=data[ix, :],
+            mode="lines",
+            name=x_titles[xi_i],
+            visible=(vi == 0),
+            showlegend=(vi == 0),
+            line=dict(color=colors_x[xi_i], width=2),
+        ))
+
+buttons3 = []
+for vi, vname in enumerate(xvar_names):
+    vis = []
+    for vj in range(len(xvar_names)):
+        vis.extend([vj == vi] * n_traces_per_xvar)
+    buttons3.append(dict(
+        label=vname,
+        method="update",
+        args=[{"visible": vis, "showlegend": [vj == vi for vj in range(len(xvar_names)) for _ in range(n_traces_per_xvar)]},
+              {"title": f"x-resolved time series: {vname}", "yaxis.title.text": vname}],
+    ))
+
+fig3.update_layout(
+    updatemenus=[dict(
+        active=0, buttons=buttons3,
+        x=0.0, y=1.12, xanchor="left", yanchor="top", type="dropdown",
+    )],
+    height=500, width=1100,
+    title=f"x-resolved time series: {xvar_names[0]}",
+    xaxis_title="Time [s]",
+    yaxis_title=xvar_names[0],
+    hovermode="x unified",
+)
+fig3.show()

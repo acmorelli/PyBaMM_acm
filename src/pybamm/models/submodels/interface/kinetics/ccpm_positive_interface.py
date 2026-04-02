@@ -89,15 +89,11 @@ class CCPMPositiveInterface(BaseKinetics):
         # For now, just return the currents as "rates" for testing purposes
         j_tr_a, j_tr_b, j_tr_c, j_tot = self._get_ccpm_currents(variables)
         F = pybamm.constants.F
-        R_p = self.param.p.prim.R   # or self.param.p.prim.R
+        R_p = self.param.p.prim.R   
 
-        beta = 3 / (F * R_p) #TODO - A/FV: spherical particles
+        beta = 3 / (F * 0.80 * R_p) #TODO - A/FV: spherical particles DEBUG reduce size
 
-        # Do NOT mask R here — the mask would zero R at the transition
-        # boundary cell, and PyBaMM's node-to-edge averaging would halve
-        # R at the critical edge where mass exits the branch.
-        # The branch confinement is enforced via mask_a/b/c on the RHS
-        # (in ccpm_positive_particle.py), not on R.
+        # reaction rates
         R_a = -beta * j_tr_a
         R_b = -beta * j_tr_b
         R_c = -beta * j_tr_c

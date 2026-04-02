@@ -235,6 +235,11 @@ class CCPMPositiveParticle(BaseParticle):
             """Normalized box for one FV cell starting at c_edge_left."""
             box = (c_p >= c_edge_left) * (c_p <= c_edge_left + dc)
             return box / pybamm.Integral(box, c_p)
+        
+        def cell_delta_charge(c_edge_right):
+            """Normalized box for one FV cell starting at c_edge_left."""
+            box = (c_p <= c_edge_right) * (c_p >= c_edge_right - dc)
+            return box / pybamm.Integral(box, c_p)
 
         # Transition points and masks
         c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c = (
@@ -265,8 +270,8 @@ class CCPMPositiveParticle(BaseParticle):
             S_c = J_B_to_C * dC_c2
 
         elif self.mode == "charge":
-            dA_c1  = cell_delta(c1_star - dc)   # B->A: into cell 20 of A
-            dB_sp2 = cell_delta(c_sp2 - dc)     # C->B: into cell 236 of B
+            dA_c1  = cell_delta_charge(c1_star)   # B->A: into cell 20 of A
+            dB_sp2 = cell_delta_charge(c_sp2)     # C->B: into cell 236 of B
             J_B_to_A = pybamm.Integral(pybamm.div(F_b) * mask_b_to_c1, c_p) # = -F_b(c1_star)
             J_C_to_B = pybamm.Integral(pybamm.div(F_c) * mask_c_to_b, c_p)  # = -F_c(c_sp2)
 

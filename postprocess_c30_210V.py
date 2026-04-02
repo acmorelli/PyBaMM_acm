@@ -47,6 +47,9 @@ jtr_c = arr(solution, "CCPM Branch C interfacial current density [A.m-2]")
 J_AB = arr(solution, "Branch A to B scalar flux")
 J_BC = arr(solution, "Branch B to C scalar flux")
 
+ocp_pos_xavg = arr(solution, "X-averaged positive electrode open-circuit potential [V]")
+ocp_pos = arr(solution, "Positive electrode open-circuit potential [V]")
+
 # ── Console diagnostics ────────────────────────────────────────────────
 n = len(time)
 print("=== MASS CHECK ===")
@@ -108,6 +111,39 @@ fig1.update_layout(
     title="C/30 discharge to 2.10V — time series",
 )
 fig1.show()
+
+# ── Figure 1b: Positive electrode OCP ──────────────────────────────────
+fig1b = make_subplots(
+    rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+    subplot_titles=[
+        "X-averaged positive electrode OCP [V]",
+        "Positive electrode OCP [V] (per x-node)",
+    ],
+)
+
+fig1b.add_trace(
+    go.Scatter(x=time, y=ocp_pos_xavg, mode="lines", name="OCP x-avg"),
+    row=1, col=1,
+)
+
+n_x_ocp = ocp_pos.shape[0]
+for ix in range(n_x_ocp):
+    fig1b.add_trace(
+        go.Scatter(
+            x=time, y=ocp_pos[ix, :], mode="lines",
+            name=f"x node {ix}", opacity=0.7,
+        ),
+        row=2, col=1,
+    )
+
+fig1b.update_xaxes(title_text="Time [s]", row=2, col=1)
+fig1b.update_yaxes(title_text="OCP [V]", row=1, col=1)
+fig1b.update_yaxes(title_text="OCP [V]", row=2, col=1)
+fig1b.update_layout(
+    height=800, width=1100, hovermode="x unified",
+    title="C/30 discharge to 2.10V — Positive electrode OCP",
+)
+fig1b.show()
 
 # ── Figure 2: Spatial dropdown plot (g_a, g_b, g_c, + rates/currents if available)
 c_p_max = param["Maximum concentration in positive electrode [mol.m-3]"]
