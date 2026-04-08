@@ -4,12 +4,13 @@ from pybamm.models.full_battery_models.lithium_ion.dfn_ccpm import DFN_CCPM
 
 import numpy as np
 import matplotlib.pyplot as plt
-model = DFN_CCPM()
+param = pybamm.ParameterValues("Prada2013")
+model = DFN_CCPM(parameter_values=param)
 print("Model built.")
 
 
 # 1. Create the model
-model = DFN_CCPM()
+model = DFN_CCPM(parameter_values=param)
 
 """ print("=== keys containing CCPM ===")
 for k in sorted(model.variables.keys()):

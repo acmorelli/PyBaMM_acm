@@ -14,7 +14,7 @@ def arr(sol, name):
 
 ##### BROKEN !!
 # ── Model / solve ──────────────────────────────────────────────────────
-path=r"C:\Users\dottavianomo\programming\ccpm_snap_mesh_Ra_smooth\C30_2V_modeDch.pkl"
+path=r"C:\Users\dottavianomo\programming\ccpm_snap_mesh_Ra_smooth\C30_318V_modeDch_smallerRadius.pkl"
 sim=pybamm.load(path)
 model=sim.model
 param=sim.parameter_values

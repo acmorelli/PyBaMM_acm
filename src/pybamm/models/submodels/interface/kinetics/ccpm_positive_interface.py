@@ -1,10 +1,12 @@
 #C:\Users\dottavianomo\programming\PyBaMM_acm\src\pybamm\models\submodels\interface\kinetics\ccpm_positive_interface.py
 import pybamm
 from .base_kinetics import BaseKinetics
+from ...particle.ccpm_positive_particle import CCPMPositiveParticle
 
 
 class CCPMPositiveInterface(BaseKinetics):
-    def __init__(self, param, domain, reaction, options, phase="primary"):
+    def __init__(self, param, domain, reaction, options, phase="primary",
+                 R_p_float=None, npts=300, c_max_float=None):
         super().__init__(param, domain, reaction, options=options, phase=phase)
         self.j_tr_a = None
         self.j_tr_b = None
@@ -13,6 +15,21 @@ class CCPMPositiveInterface(BaseKinetics):
         self.R_a = None # reaction rate for branch a
         self.R_b = None 
         self.R_c = None
+
+        if R_p_float is not None and c_max_float is not None:
+            consts = CCPMPositiveParticle.compute_branch_constants(
+                R_p_float, npts, c_max_float
+            )
+            self.omega   = consts["omega"]
+            self.c1_star = consts["c1_star"]
+            self.c_sp1   = consts["c_sp1"]
+            self.c_sp2   = consts["c_sp2"]
+            self.c2_star = consts["c2_star"]
+            self.npts    = consts["npts"]
+        else:
+            raise ValueError(
+                "R_p_float and c_max_float are required for CCPMPositiveInterface"
+            )
         
 
         
@@ -31,16 +48,12 @@ class CCPMPositiveInterface(BaseKinetics):
         U_eq_p0 = pybamm.Scalar(3.397) #3.42 b#3.397 #self.param.p.U_ref  # scalar 3.42V for LFP (Clarke2026)     #TODO
         j_prime_p0 = pybamm.Scalar(0.948) # 2 #0.948 #TODO: reaction rate constant in positive electrode
         c_e_init = self.param.c_e_init
-        omega = pybamm.Scalar(3) #TODO self.param?? Eq 13 from Clarke2026
-        # Snapped to exact cell edges on truncated domain [eps, c_p_max]
-        # Cell edge k is at: eps + k/npts * (c_p_max - eps)
-        npts = 300
-        eps = 1e-8 * self.param.p.prim.c_max
-        L = c_p_max - eps
-        c1_star = eps + (21 / npts) * L
-        c2_star = eps + (279 / npts) * L
-        c_sp1 = eps + (63 / npts) * L
-        c_sp2 = eps + (237 / npts) * L
+        omega = pybamm.Scalar(self.omega)
+        # Branch boundaries from compute_branch_constants (snapped to cell edges)
+        c1_star = self.c1_star
+        c2_star = self.c2_star
+        c_sp1 = self.c_sp1
+        c_sp2 = self.c_sp2
         
         # get macroscopic fields
         phi_p = variables["Positive electrode potential [V]"]
@@ -89,9 +102,8 @@ class CCPMPositiveInterface(BaseKinetics):
         # For now, just return the currents as "rates" for testing purposes
         j_tr_a, j_tr_b, j_tr_c, j_tot = self._get_ccpm_currents(variables)
         F = pybamm.constants.F
-        R_p = self.param.p.prim.R   
 
-        beta = 3 / (F * 0.80 * R_p) #TODO - A/FV: spherical particles DEBUG reduce size
+        beta = 3 / (F * self.param.p.prim.R ) #TODO - A/FV: spherical particles DEBUG reduce size
 
         # reaction rates
         R_a = -beta * j_tr_a

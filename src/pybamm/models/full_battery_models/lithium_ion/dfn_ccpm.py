@@ -14,9 +14,22 @@ class DFN_CCPM(DFN):
         build=True,
         initial_branch="A",
         mode="discharge",
+        parameter_values=None,
+        npts=300,
     ):
         self.initial_branch = initial_branch.upper()
         self.mode = mode
+        self._ccpm_npts = npts
+        if parameter_values is None:
+            raise ValueError("parameter_values is required for DFN_CCPM")
+        self._ccpm_R_p = float(
+            parameter_values["Positive particle radius [m]"]
+        )
+        self._ccpm_c_max = float(
+            parameter_values[
+                "Maximum concentration in positive electrode [mol.m-3]"
+            ]
+        )
         super().__init__(options=options, name=name, build=build)
 
     @property
@@ -37,7 +50,7 @@ class DFN_CCPM(DFN):
     @property
     def default_var_pts(self):
         var_pts = super().default_var_pts
-        var_pts.update({"c_p": 300})
+        var_pts.update({"c_p": self._ccpm_npts})
         return var_pts
 
     @property
@@ -58,6 +71,7 @@ class DFN_CCPM(DFN):
 
     def set_particle_submodel(self):
         super().set_particle_submodel()
+        npts = self.default_var_pts["c_p"]
         self.submodels["positive primary particle"] = CCPMPositiveParticle(
             self.param,
             domain="positive",
@@ -65,6 +79,9 @@ class DFN_CCPM(DFN):
             phase="primary",
             initial_branch=self.initial_branch,
             mode=self.mode,
+            R_p_float=self._ccpm_R_p,
+            npts=npts,
+            c_max_float=self._ccpm_c_max,
         )
 
     def set_open_circuit_potential_submodel(self):
@@ -108,7 +125,10 @@ class DFN_CCPM(DFN):
             phases = self.options.phases[domain]
             for phase in phases:
                 submod = CCPMPositiveInterface(
-                    self.param, domain, "lithium-ion main", self.options, phase
+                    self.param, domain, "lithium-ion main", self.options, phase,
+                    R_p_float=self._ccpm_R_p,
+                    npts=self.default_var_pts["c_p"],
+                    c_max_float=self._ccpm_c_max,
                 )
                 self.submodels[f"{domain} {phase} interface"] = submod
 

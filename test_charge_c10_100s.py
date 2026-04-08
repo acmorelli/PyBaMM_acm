@@ -14,8 +14,8 @@ def arr(sol, name):
 
 
 # ── Model / solve ──────────────────────────────────────────────────────
-model = DFN_CCPM(initial_branch="C", source_method="gaussian")
 param = pybamm.ParameterValues("Prada2013")
+model = DFN_CCPM(initial_branch="C", parameter_values=param)
 
 # Set c_init to θ=0.90 (deep in Branch C)
 c_max_raw = param["Maximum concentration in positive electrode [mol.m-3]"]

@@ -66,7 +66,7 @@ print(f"Last  3 centres: {cell_centres[-3:]}")
 print()
 
 # ---------- build model and solve for t=0 only ----------
-model = DFN_CCPM(initial_branch="C", source_method="gaussian")
+model = DFN_CCPM(initial_branch="C", parameter_values=parameter_values)
 
 # Tiny discharge just to get solver to evaluate t=0
 experiment = pybamm.Experiment(["Discharge at C/30 for 1 seconds"])

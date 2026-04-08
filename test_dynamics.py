@@ -30,7 +30,7 @@ def sign_status(a):
 # -----------------------------
 parameter_values = pybamm.ParameterValues("Prada2013")
 #parameter_values.set_initial_state(0.85)
-model = DFN_CCPM(initial_branch="A", source_method="gaussian") #flux_form
+model = DFN_CCPM(initial_branch="A", parameter_values=parameter_values) #flux_form
 # mode fast instead of safe in the solver
 # timesteps 
 experiment = pybamm.Experiment([

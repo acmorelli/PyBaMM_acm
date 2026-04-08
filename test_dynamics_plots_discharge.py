@@ -14,8 +14,8 @@ def arr(sol, name):
 
 
 # ── Model / solve ──────────────────────────────────────────────────────
-model = DFN_CCPM(initial_branch="A", mode="discharge")
 param = pybamm.ParameterValues("Prada2013")
+model = DFN_CCPM(initial_branch="A", mode="discharge", parameter_values=param)
 experiment = pybamm.Experiment(["Discharge at C/30 until 3.18V"])
 
 sim = pybamm.Simulation(

@@ -15,8 +15,8 @@ PICKLE_PATH = "ccpm_gaussian_1c_100s.pkl"
 
 # ── Build & solve ──────────────────────────────────────────────────────────────
 print("Building model (gaussian) …")
-model = DFN_CCPM(build=True, initial_branch="A", source_method="gaussian")
 param = pybamm.ParameterValues("Prada2013")
+model = DFN_CCPM(build=True, initial_branch="A", parameter_values=param)
 experiment = pybamm.Experiment(["Discharge at 1C for 100 seconds"])
 sim = pybamm.Simulation(
     model,

@@ -1,5 +1,7 @@
 #C:\Users\dottavianomo\programming\PyBaMM_acm\src\pybamm\models\submodels\particle\ccpm_positive_particle.py
 from .base_particle import BaseParticle
+import numpy as np
+from scipy.optimize import brentq
 import pybamm
 
 
@@ -19,7 +21,10 @@ class CCPMPositiveParticle(BaseParticle):
         options=None,
         phase="primary",
         initial_branch="A",
-        mode='discharge'
+        mode='discharge',
+        R_p_float=None,
+        npts=300,
+        c_max_float=None,
 
     ):
         super().__init__(
@@ -33,6 +38,97 @@ class CCPMPositiveParticle(BaseParticle):
         self.c_p_space = pybamm.standard_spatial_vars.c_p
         self.initial_branch = initial_branch.upper()
         self.mode = mode
+
+        if R_p_float is not None and c_max_float is not None:
+            consts = self.compute_branch_constants(R_p_float, npts, c_max_float)
+            self.omega   = consts["omega"]
+            self.c1_star = consts["c1_star"]
+            self.c_sp1   = consts["c_sp1"]
+            self.c_sp2   = consts["c_sp2"]
+            self.c2_star = consts["c2_star"]
+            self.npts    = consts["npts"]
+        else:
+            raise ValueError(
+                "R_p_float and c_max_float are required for CCPMPositiveParticle"
+            )
+
+    @staticmethod
+    def compute_branch_constants(R_p_float, npts, c_max_float):
+        """Compute Ω, spinodal, and binodal concentrations from particle radius.
+
+        Thermodynamic quantities computed on true domain [0, c_max].
+        Results snapped to nearest FV cell edge on truncated domain
+        [eps_c, c_max - eps_c].
+
+        Parameters
+        ----------
+        R_p_float : float
+            Particle radius [m].
+        npts : int
+            Number of FV cells on the concentration grid.
+        c_max_float : float
+            Maximum lithium concentration [mol/m³].
+
+        Returns
+        -------
+        dict with omega (float), c1_star, c_sp1, c_sp2, c2_star
+        (pybamm.Scalar), npts (int).
+        """
+        # Ferguson & Bazant 2014, Electrochim. Acta 146, 89-97
+        omega = 4.5 - (2.5 / 0.18e9) * 3.0 / R_p_float
+
+        # Spinodals: ∂²G/∂x² = 0 → θ_sp = (1 ± sqrt(1 - 2/Ω)) / 2
+        disc = 1.0 - 2.0 / omega
+        if disc <= 0:
+            raise ValueError(
+                f"Ω={omega:.4f} < 2: no miscibility gap (particle too small?)"
+            )
+        sqrt_disc = np.sqrt(disc)
+        theta_sp1 = (1.0 - sqrt_disc) / 2.0
+        theta_sp2 = (1.0 + sqrt_disc) / 2.0
+
+        # Binodals: μ(θ) = 0 → ln(θ/(1-θ)) + Ω(1-2θ) = 0
+        def mu_eq(x):
+            return np.log(x / (1.0 - x)) + omega * (1.0 - 2.0 * x)
+
+        theta_bin1 = brentq(mu_eq, 1e-12, theta_sp1 - 1e-12)
+        theta_bin2 = 1.0 - theta_bin1
+
+        # Snap to nearest cell EDGE on truncated FV domain
+        eps_c = 1e-8 * c_max_float
+        c_min_t = eps_c
+        c_max_t = c_max_float - eps_c
+        L = c_max_t - c_min_t
+
+        def snap_to_edge(theta):
+            c_true = theta * c_max_float
+            k = round((c_true - c_min_t) / L * npts)
+            k = max(0, min(npts, k))
+            return c_min_t + k / npts * L
+
+        c1_star = snap_to_edge(theta_bin1)
+        c_sp1   = snap_to_edge(theta_sp1)
+        c_sp2   = snap_to_edge(theta_sp2)
+        c2_star = snap_to_edge(theta_bin2)
+
+        print(f"[CCPM] Ω={omega:.4f}, R_p={R_p_float*1e9:.1f}nm, npts={npts}")
+        print(f"  spinodals: θ_sp1={theta_sp1:.6f} → edge "
+              f"{round((snap_to_edge(theta_sp1) - c_min_t) / L * npts)}")
+        print(f"             θ_sp2={theta_sp2:.6f} → edge "
+              f"{round((snap_to_edge(theta_sp2) - c_min_t) / L * npts)}")
+        print(f"  binodals:  θ_b1 ={theta_bin1:.6f} → edge "
+              f"{round((snap_to_edge(theta_bin1) - c_min_t) / L * npts)}")
+        print(f"             θ_b2 ={theta_bin2:.6f} → edge "
+              f"{round((snap_to_edge(theta_bin2) - c_min_t) / L * npts)}")
+
+        return {
+            "omega": omega,
+            "c1_star": pybamm.Scalar(c1_star),
+            "c_sp1":   pybamm.Scalar(c_sp1),
+            "c_sp2":   pybamm.Scalar(c_sp2),
+            "c2_star": pybamm.Scalar(c2_star),
+            "npts":    npts,
+        }
         
     def get_fundamental_variables(self):
         # 1. Define the 3 PDFs as state variables (Differential Variables)
@@ -75,31 +171,13 @@ class CCPMPositiveParticle(BaseParticle):
 
         return variables
     def _branch_geometry(self, c_p):
-        eps=1e-8*self.param.p.prim.c_max 
-        c_min = eps                          # left edge of truncated domain
-        c_max = self.param.p.prim.c_max -eps # right edge of truncated domain
+        # Branch boundaries computed in __init__ via compute_branch_constants
+        # (analytical spinodals/binodals from Ω, snapped to cell edges)
+        mask_a = (c_p <= self.c_sp1)
+        mask_b = (c_p >= self.c1_star) * (c_p <= self.c2_star)
+        mask_c = (c_p >= self.c_sp2)
 
-        # Snapped to exact cell edges for npts=300 (edge indices 21,63,237,279)
-        # Cell edge k is at: c_min + k/npts * (c_max - c_min)
-        #
-        # Original Clarke2026 θ values  →  Snapped θ (= cell edge / c_max_raw)
-        #   c1_star:  θ = 0.0709        →  21/300  = 0.0700
-        #   c_sp1:    θ = 0.2113        →  63/300  = 0.2100
-        #   c_sp2:    θ = 0.7887        →  237/300 = 0.7900
-        #   c2_star:  θ = 0.9291        →  279/300 = 0.9300
-        npts = 300
-        L = c_max - c_min  # domain length
-        c1_star = c_min + pybamm.Scalar(21 / npts) * L
-        c_sp1   = c_min + pybamm.Scalar(63 / npts) * L
-        c_sp2   = c_min + pybamm.Scalar(237 / npts) * L
-        c2_star = c_min + pybamm.Scalar(279 / npts) * L
-
-        # same boolean-mask style you already used
-        mask_a = (c_p <= c_sp1)
-        mask_b = (c_p >= c1_star) * (c_p <= c2_star)
-        mask_c = (c_p >= c_sp2)
-
-        return c1_star, c_sp1, c_sp2, c2_star, mask_a, mask_b, mask_c
+        return self.c1_star, self.c_sp1, self.c_sp2, self.c2_star, mask_a, mask_b, mask_c
 
     def get_coupled_variables(self, variables):
         # Retrieve our PDFs and the concentration grid
@@ -228,7 +306,7 @@ class CCPMPositiveParticle(BaseParticle):
         # Single-cell FV deposit: normalized box selecting one cell
         eps_c = pybamm.Scalar(1e-8) * self.param.p.prim.c_max
         c_max_eff = self.param.p.prim.c_max - eps_c
-        npts = 300
+        npts = self.npts
         dc = (c_max_eff - eps_c) / npts
 
         def cell_delta(c_edge_left):
@@ -252,7 +330,7 @@ class CCPMPositiveParticle(BaseParticle):
         mask_b_to_c1 = (c_p >= c1_star)  # cells 21..299
         mask_c_to_b = (c_p >= c_sp2)  # cells 237..299
 
-        # Default all fluxes to zero; only the active direction is computed
+        # default all fluxes to zero, so only the active direction is computed
         J_A_to_B = pybamm.Scalar(0)
         J_B_to_A = pybamm.Scalar(0)
         J_B_to_C = pybamm.Scalar(0)
@@ -307,12 +385,9 @@ class CCPMPositiveParticle(BaseParticle):
         c_min_domain = eps_c
         c_max_domain = c_max_raw - eps_c
 
-        # Snap to exact cell edges on the truncated domain, consistent
-        # with _branch_geometry: edge k = c_min + k/npts * (c_max - c_min)
-        npts = 300
-        L = c_max_domain - c_min_domain
-        c_sp1 = c_min_domain + pybamm.Scalar(63 / npts) * L
-        c_sp2 = c_min_domain + pybamm.Scalar(237 / npts) * L
+        # Branch boundaries from compute_branch_constants (snapped to cell edges)
+        c_sp1 = self.c_sp1
+        c_sp2 = self.c_sp2
 
         c_p = variables["CCPM positive particle concentration"]
         c_init_particle = self.param.p.prim.c_init  # r domain
@@ -332,11 +407,12 @@ class CCPMPositiveParticle(BaseParticle):
             shifted_ = c_p - c_min_domain
             return shifted_ * (c_sp1 - c_p) * pybamm.exp(-shifted_ / lam_) * (c_p <= c_sp1)
 
-        def _build_raw_pdf_C(mu_, sigma_):
-            """Tight Gaussian (Dirac-delta approximation) centred on mu_.
-            g(c) ∝ exp(-(c - μ)²/(2σ²))  with σ ~ 2·dc so it becomes
-            zero within a few cells of c_init."""
-            return pybamm.exp(-((c_p - mu_) ** 2) / (2 * sigma_ ** 2))
+        def _build_raw_pdf_C(lam_):
+            """Mirror of branch A: Gamma(2,λ) anchored at c_max, support ≥ c_sp2.
+            g(c) ∝ (c_max - c) * (c - c_sp2) * exp(-(c_max - c)/λ) * 𝟙(c ≥ c_sp2)
+            """
+            shifted_ = c_max_domain - c_p
+            return shifted_ * (c_p - c_sp2) * pybamm.exp(-shifted_ / lam_) * (c_p >= c_sp2)
 
         if self.initial_branch == "A":
             lam0 = (c_init_x - c_min_domain) / 2
@@ -348,11 +424,13 @@ class CCPMPositiveParticle(BaseParticle):
             raw_pdf = _build_raw_pdf_A(lam)
 
         elif self.initial_branch == "C":
-            # Tight Gaussian approximating a Dirac delta at c_init.
-            # σ = 2·dc  →  becomes zero ~4-5 cells from c_init.
-            dc = L / npts
-            sigma = 2 * dc
-            raw_pdf = _build_raw_pdf_C(c_init_x, sigma)
+            # Mirror of branch A: Gamma(2,λ) anchored at c_max_domain.
+            # Two-pass λ correction so discrete mean = c_init exactly.
+            lam0 = (c_max_domain - c_init_x) / 2
+            trial = _build_raw_pdf_C(lam0)
+            mu_trial = pybamm.Integral(trial * c_p, c_p) / pybamm.Integral(trial, c_p)
+            lam = lam0 * (c_max_domain - c_init_x) / (c_max_domain - mu_trial)
+            raw_pdf = _build_raw_pdf_C(lam)
 
         else:
             raise ValueError(

@@ -93,7 +93,7 @@ print("Chosen physical CCPM initial branch:", initial_branch)
 # For your current parameter set this should be A.
 # Starting from A, switching is tested under CHARGE:
 # A -> B -> C
-model = DFN_CCPM(initial_branch=initial_branch)
+model = DFN_CCPM(initial_branch=initial_branch, parameter_values=parameter_values)
 
 parameter_values.update(
     {

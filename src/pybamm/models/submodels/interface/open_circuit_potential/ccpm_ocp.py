@@ -8,14 +8,11 @@ from . import BaseOpenCircuitPotential
 
 class CCPMOpenCircuitPotential(BaseOpenCircuitPotential):
     """
-    Computes an effective OCP from the CCPM-averaged stoichiometry θ_CCPM.
-
-    The CCPM has no standard OCP in the Fickian sense. Instead, the effective
-    equilibrium potential at a given stoichiometry θ is:
+    Computes OCP from the CCPM-averaged stoichiometry θ_CCPM.
 
         U_eq_eff(θ) = U_eq_p0 - (RT/F) * [ln(θ/(1-θ)) + Ω*(1 - 2θ)]
 
-    where U_eq_p0 = 3.42 V is the LFP plateau reference, Ω = 3 is the regular
+    where U_eq_p0 is the LFP plateau reference, Ω is the regular
     solution parameter, and θ_CCPM = ∫(g_a+g_b+g_c)*(c_p/c_max) dc_p is computed
     in the particle model.
     """
@@ -33,10 +30,10 @@ class CCPMOpenCircuitPotential(BaseOpenCircuitPotential):
         # Physical constants
         F = pybamm.constants.F
         R = pybamm.constants.R
-        U_eq_p0 = pybamm.Scalar(3.397)  # V, LFP plateau reference
-        omega = pybamm.Scalar(3)  # regular solution parameter
+        U_eq_p0 = pybamm.Scalar(3.397) 
+        omega = 4.5 - (2.5 / 0.18e9 ) * 3 / self.param.p.prim.R  
 
-        # Effective OCP: U_eq_eff = U_eq_p0 - μ_p(θ)/F
+        #  OCP: U_eq_eff = U_eq_p0 - μ_p(θ)/F
         ocp_surf = U_eq_p0 - (R * T / F) * (
             pybamm.log(theta_CCPM / (1 - theta_CCPM))
             + omega * (1 - 2 * theta_CCPM)

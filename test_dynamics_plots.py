@@ -29,7 +29,7 @@ def sign_status(a):
 # Model / parameters
 # -----------------------------
 parameter_values = pybamm.ParameterValues("Prada2013")
-model = DFN_CCPM(initial_branch="A", mode="discharge")
+model = DFN_CCPM(initial_branch="A", mode="discharge", parameter_values=parameter_values)
 
 experiment = pybamm.Experiment([
     "Discharge at C/30 for 300s",    #3.25V
