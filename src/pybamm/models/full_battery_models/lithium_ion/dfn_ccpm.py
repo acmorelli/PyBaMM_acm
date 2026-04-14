@@ -16,10 +16,14 @@ class DFN_CCPM(DFN):
         mode="discharge",
         parameter_values=None,
         npts=300,
+        solid_diffusion="none",
+        N_shell=3,
     ):
         self.initial_branch = initial_branch.upper()
         self.mode = mode
         self._ccpm_npts = npts
+        self._ccpm_solid_diffusion = solid_diffusion
+        self._ccpm_N_shell = N_shell
         if parameter_values is None:
             raise ValueError("parameter_values is required for DFN_CCPM")
         self._ccpm_R_p = float(
@@ -30,6 +34,10 @@ class DFN_CCPM(DFN):
                 "Maximum concentration in positive electrode [mol.m-3]"
             ]
         )
+        consts = CCPMPositiveParticle.compute_branch_constants(
+            self._ccpm_R_p, self._ccpm_npts, self._ccpm_c_max
+        )
+        self._ccpm_omega = consts["omega"]
         super().__init__(options=options, name=name, build=build)
 
     @property
@@ -82,6 +90,8 @@ class DFN_CCPM(DFN):
             R_p_float=self._ccpm_R_p,
             npts=npts,
             c_max_float=self._ccpm_c_max,
+            solid_diffusion=self._ccpm_solid_diffusion,
+            N_shell=self._ccpm_N_shell,
         )
 
     def set_open_circuit_potential_submodel(self):
@@ -95,6 +105,7 @@ class DFN_CCPM(DFN):
                 self.options,
                 "primary",
                 self.x_average,
+                omega=self._ccpm_omega,
             )
         )
 
@@ -129,6 +140,9 @@ class DFN_CCPM(DFN):
                     R_p_float=self._ccpm_R_p,
                     npts=self.default_var_pts["c_p"],
                     c_max_float=self._ccpm_c_max,
+                    solid_diffusion=self._ccpm_solid_diffusion,
+                    mode=self.mode,
+                    N_shell=self._ccpm_N_shell,
                 )
                 self.submodels[f"{domain} {phase} interface"] = submod
 

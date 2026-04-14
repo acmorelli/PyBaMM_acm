@@ -1,3 +1,8 @@
+"""
+CCPM half-cell test: Li metal || LFP  —  2C DISCHARGE with core-shell solid diffusion.
+Srinivasan & Newman (2004) quasi-steady shrinking core model.
+"""
+
 import numpy as np
 import pybamm
 import matplotlib.pyplot as plt
@@ -5,11 +10,7 @@ from pybamm.models.full_battery_models.lithium_ion.dfn_ccpm import DFN_CCPM
 
 
 def li_metal_electrolyte_exchange_current_density_Xu2019(c_e, c_Li, T):
-    """
-    Exchange-current density for Butler-Volmer reactions between Li metal and
-    LiPF6 in EC:DMC [Xu2019].
-    """
-    m_ref = 3.5e-8 * pybamm.constants.F  # (A/m2)(mol/m3)
+    m_ref = 3.5e-8 * pybamm.constants.F
     return m_ref * c_Li**0.7 * c_e**0.3
 
 
@@ -19,33 +20,34 @@ def arr(sol, name):
 
 parameter_values = pybamm.ParameterValues("Prada2013")
 
-# Patch Prada2013 graphite-anode parameters with Li-metal values for half-cell simulation
-# Values from Ecker2015_graphite_halfcell / Xu2019 reference sets.
 parameter_values.update(
     {
-        # Li metal electrode properties
         "Negative electrode OCP [V]": 0.0,
-        "Negative electrode conductivity [S.m-1]": 1.0776e7,   # bulk Li metal
-        "Negative electrode thickness [m]": 7e-4,              # 700 µm Li foil
+        "Negative electrode conductivity [S.m-1]": 1.0776e7,
+        "Negative electrode thickness [m]": 7e-4,
         "Negative electrode OCP entropic change [V.K-1]": 0.0,
         "Negative electrode charge transfer coefficient": 0.5,
         "Negative electrode double-layer capacity [F.m-2]": 0.2,
         "Lithium metal partial molar volume [m3.mol-1]": 1.3e-5,
         "Exchange-current density for lithium metal electrode [A.m-2]"
         "": li_metal_electrolyte_exchange_current_density_Xu2019,
+        # DEBUG: larger D_s so quasi-steady shell doesn't blow up
+        "Positive particle diffusivity [m2.s-1]": 1e-14,
     },
     check_already_exists=False,
 )
 
+# ── Model with core-shell solid diffusion ──────────────────────────────
 model = DFN_CCPM(
     options={"working electrode": "positive"},
     initial_branch="A",
     mode="discharge",
     parameter_values=parameter_values,
+    solid_diffusion="core_shell",
 )
 
 experiment = pybamm.Experiment(
-    ["Discharge at C/20 for 120000 seconds"],
+    ["Discharge at 2C for 3000 seconds"],
 )
 
 sim = pybamm.Simulation(
@@ -55,10 +57,10 @@ sim = pybamm.Simulation(
     solver=pybamm.CasadiSolver(mode="safe"),
 )
 
-print("Building & solving half-cell CCPM …")
-solution = sim.solve() #1543
-sim.save("half_cell_omega_c20_discharge.pkl")
-print("Done. Saved to half_cell_omega_c20_discharge.pkl\n")
+print("Building & solving half-cell CCPM (core-shell, 2C discharge) …")
+solution = sim.solve()
+sim.save("half_cell_omega_2c_discharge_core_shell.pkl")
+print("Done.\n")
 
 # ── Diagnostics ────────────────────────────────────────────────────────
 time = solution["Time [s]"].entries
@@ -82,6 +84,7 @@ print(f"  Time:    {time[-1]:.1f} s")
 
 # ── Plots ──────────────────────────────────────────────────────────────
 fig, axes = plt.subplots(2, 2, figsize=(10, 7), tight_layout=True)
+fig.suptitle("Core-shell 2C discharge")
 
 axes[0, 0].plot(time, voltage)
 axes[0, 0].set(xlabel="Time [s]", ylabel="Voltage [V]", title="Half-cell voltage")
@@ -98,13 +101,10 @@ axes[1, 0].set(xlabel="Time [s]", ylabel="Branch mass", title="Branch masses")
 axes[1, 1].plot(time, m_tot)
 axes[1, 1].set(xlabel="Time [s]", ylabel="Total mass", title="Total mass (conservation)")
 
-plt.savefig("half_cell_discharge_omega_c20.png", dpi=150)
-#plt.show()
-print("\nPlot saved to half_cell_discharge_omega_c20.png")
+plt.savefig("half_cell_discharge_omega_2c_core_shell.png", dpi=150)
+print("\nPlot saved to half_cell_discharge_omega_2c_core_shell.png")
 
-# ── Fig 7: OCP shift vs θ ─────────────────────────────────────────────
 from postprocess_half_cell_fig7 import plot_fig7
-
-fig7 = plot_fig7(sol_dis=solution, save_path="half_cell_discharge_omega_c20_fig7.png")
+fig7 = plot_fig7(sol_dis=solution, save_path="half_cell_discharge_omega_2c_core_shell_fig7.png")
 plt.show()
 plt.close(fig7)

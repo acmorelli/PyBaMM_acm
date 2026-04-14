@@ -6,7 +6,8 @@ from ...particle.ccpm_positive_particle import CCPMPositiveParticle
 
 class CCPMPositiveInterface(BaseKinetics):
     def __init__(self, param, domain, reaction, options, phase="primary",
-                 R_p_float=None, npts=300, c_max_float=None):
+                 R_p_float=None, npts=300, c_max_float=None,
+                 solid_diffusion="none", mode="discharge", N_shell=4):
         super().__init__(param, domain, reaction, options=options, phase=phase)
         self.j_tr_a = None
         self.j_tr_b = None
@@ -15,6 +16,9 @@ class CCPMPositiveInterface(BaseKinetics):
         self.R_a = None # reaction rate for branch a
         self.R_b = None 
         self.R_c = None
+        self.solid_diffusion = solid_diffusion  # "none" or "core_shell"
+        self.mode = mode  # "charge" or "discharge"
+        self.N_shell = N_shell  # number of chi intervals for shell FDM
 
         if R_p_float is not None and c_max_float is not None:
             consts = CCPMPositiveParticle.compute_branch_constants(
@@ -80,9 +84,25 @@ class CCPMPositiveInterface(BaseKinetics):
         overpotential_term_mixedPhase  = (F * eta_broadcast)       / (2 * R * T_p_broadcast)
         
         # signal: from particle to electrolyte, so positive j means lithium leaving the particle (delithiation)
-        j_tr_a = common_factor * (c_p / c_p_max) ** 0.5 * (1-(c_p/c_p_max))**0.5 * pybamm.sinh(overpotential_term_singlePhase)
-        j_tr_b = common_factor * (c1_star / c_p_max) ** 0.5 * (1-(c1_star/c_p_max))**0.5 * pybamm.sinh(overpotential_term_mixedPhase)
-        j_tr_c = common_factor * (c_p / c_p_max) ** 0.5 * (1-(c_p/c_p_max))**0.5 * pybamm.sinh(overpotential_term_singlePhase)
+        j_tr_a = j_tr_c = common_factor * (c_p / c_p_max) ** 0.5 * (1-(c_p/c_p_max))**0.5 * pybamm.sinh(overpotential_term_singlePhase)
+
+        if self.solid_diffusion == "core_shell":
+            # ── Transient core-shell (S&N 2004): read c_surf from shell PDE ──
+            # c_surf = shell concentration at chi=1 (outermost node)
+            c_surf = variables[f"Shell concentration chi_{self.N_shell}"]
+
+            # Clamp c_surf to (eps, c_max - eps) for BV prefactor
+            eps_cs = pybamm.Scalar(1e-6) * c_p_max
+            c_surf = pybamm.smooth_max(c_surf, eps_cs, 100)
+            c_surf = pybamm.smooth_min(c_surf, c_p_max - eps_cs, 100)
+
+            theta_surf = c_surf / c_p_max
+            j_tr_b = common_factor * theta_surf**0.5 * (
+                1 - theta_surf
+            ) ** 0.5 * pybamm.sinh(overpotential_term_mixedPhase)
+        else:
+            # Original: constant binodal surface concentration
+            j_tr_b = common_factor * (c1_star / c_p_max) ** 0.5 * (1-(c1_star/c_p_max))**0.5 * pybamm.sinh(overpotential_term_mixedPhase)
         
         
         # integration - total current: couple back macroscopic domain
@@ -92,10 +112,7 @@ class CCPMPositiveInterface(BaseKinetics):
         mask_b = (c1_star <= c_p) * (c_p <= c2_star)
         mask_c = (c_sp2 <= c_p)
 
-        j_a_tot = pybamm.Integral(mask_a * g_a * j_tr_a, c_p)
-        j_b_tot = pybamm.Integral(mask_b * g_b * j_tr_b, c_p)
-        j_c_tot = pybamm.Integral(mask_c * g_c * j_tr_c, c_p)
-        j_tot = j_a_tot + j_b_tot + j_c_tot
+        j_tot = pybamm.Integral(mask_a*g_a*j_tr_a + mask_b*g_b*j_tr_b + mask_c*g_c*j_tr_c, c_p)
         return j_tr_a, j_tr_b, j_tr_c, j_tot
     
     def _get_ccpm_rates_and_currents(self, variables):

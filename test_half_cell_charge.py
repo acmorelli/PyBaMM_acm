@@ -59,7 +59,7 @@ model = DFN_CCPM(
 
 # ── Experiment ─────────────────────────────────────────────────────────
 experiment = pybamm.Experiment(
-    ["Charge at C/20 for 120000 seconds"],
+    ["Charge at 2C for 3000 seconds"],
 )
 
 # ── Simulation ─────────────────────────────────────────────────────────
@@ -72,8 +72,8 @@ sim = pybamm.Simulation(
 
 print("Building & solving half-cell CCPM …")
 solution = sim.solve() #1140
-sim.save("half_cell_omega_c20_charge.pkl")
-print("Done. Saved to half_cell_omega_c20_charge.pkl\n")
+sim.save("half_cell_omega_2c_charge.pkl")
+print("Done. Saved to half_cell_omega_2c_charge.pkl\n")
 
 # ── Diagnostics ────────────────────────────────────────────────────────
 time = solution["Time [s]"].entries
@@ -113,12 +113,12 @@ axes[1, 0].set(xlabel="Time [s]", ylabel="Branch mass", title="Branch masses")
 axes[1, 1].plot(time, m_tot)
 axes[1, 1].set(xlabel="Time [s]", ylabel="Total mass", title="Total mass (conservation)")
 
-plt.savefig("half_cell_charge_omega_c20.png", dpi=150)
+plt.savefig("half_cell_charge_omega_2c.png", dpi=150)
 #plt.show()
-print("\nPlot saved to half_cell_charge_omega_c20.png")
+print("\nPlot saved to half_cell_charge_omega_2c.png")
 
 from postprocess_half_cell_fig7 import plot_fig7
 
-fig7 = plot_fig7(sol_dis=solution, save_path="half_cell_charge_omega_c20_fig7.png")
+fig7 = plot_fig7(sol_dis=solution, save_path="half_cell_charge_omega_2c_fig7.png")
 plt.show()
 plt.close(fig7)

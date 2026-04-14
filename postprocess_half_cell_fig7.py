@@ -1,5 +1,5 @@
 """
-Replicate Clarke's Figure 7: OCP − U_eq_p0 vs stoichiometry
+Replicate Clarke's Figure 7: solid potential φ_s − U_eq_p0 vs stoichiometry
 for half-cell C/30 charge and discharge.
 
 Can be used standalone (loads pickles) or as a library via plot_fig7().
@@ -22,8 +22,8 @@ def arr(sol, name):
     return np.asarray(sol[name].entries)
 
 
-def plot_fig7(sol_chg=None, sol_dis=None, save_path="half_cell_fig7_ocp_vs_theta.png"):
-    """Plot Clarke Fig. 7: U_eq_p0 − OCP vs θ.
+def plot_fig7(sol_chg=None, sol_dis=None, save_path="half_cell_fig7_phi_s_vs_theta.png"):
+    """Plot Clarke Fig. 7: U_eq_p0 − φ_s vs θ.
 
     Parameters
     ----------
@@ -43,14 +43,14 @@ def plot_fig7(sol_chg=None, sol_dis=None, save_path="half_cell_fig7_ocp_vs_theta
     datasets = []
     if sol_chg is not None:
         theta_chg = arr(sol_chg, "X-averaged positive CCPM stoichiometry")
-        ocp_chg = arr(sol_chg, "X-averaged positive electrode open-circuit potential [V]")
-        ocp_shift_chg = U_eq_p0 - ocp_chg
-        datasets.append(("charge", theta_chg, ocp_shift_chg))
+        phi_s_chg = arr(sol_chg, "X-averaged positive electrode potential [V]")
+        phi_s_shift_chg = U_eq_p0 - phi_s_chg
+        datasets.append(("charge", theta_chg, phi_s_shift_chg))
     if sol_dis is not None:
         theta_dis = arr(sol_dis, "X-averaged positive CCPM stoichiometry")
-        ocp_dis = arr(sol_dis, "X-averaged positive electrode open-circuit potential [V]")
-        ocp_shift_dis = U_eq_p0 - ocp_dis
-        datasets.append(("discharge", theta_dis, ocp_shift_dis))
+        phi_s_dis = arr(sol_dis, "X-averaged positive electrode potential [V]")
+        phi_s_shift_dis = U_eq_p0 - phi_s_dis
+        datasets.append(("discharge", theta_dis, phi_s_shift_dis))
 
     if not datasets:
         raise ValueError("At least one of sol_chg or sol_dis must be provided")
@@ -59,7 +59,7 @@ def plot_fig7(sol_chg=None, sol_dis=None, save_path="half_cell_fig7_ocp_vs_theta
     for label, theta, shift in datasets:
         print(f"=== {label.title()} ===")
         print(f"  θ range:           [{theta.min():.6f}, {theta.max():.6f}]")
-        print(f"  U_eq_p0-OCP range: [{shift.min():.6f}, {shift.max():.6f}] V")
+        print(f"  U_eq_p0-φ_s range: [{shift.min():.6f}, {shift.max():.6f}] V")
         print()
 
     # Compute plateau hysteresis ΔV if both available
@@ -85,8 +85,8 @@ def plot_fig7(sol_chg=None, sol_dis=None, save_path="half_cell_fig7_ocp_vs_theta
     for label, theta, shift in datasets:
         axes[0].plot(theta, shift, linewidth=1.5, label=label)
     axes[0].set_xlabel("Electrode SOC (θ)")
-    axes[0].set_ylabel("U_eq_p0 − OCP [V]")
-    axes[0].set_title("U_eq_p0 − OCP vs θ (Clarke Fig. 7)")
+    axes[0].set_ylabel("U_eq_p0 − φ_s [V]")
+    axes[0].set_title("U_eq_p0 − φ_s vs θ (Clarke Fig. 7)")
     axes[0].axhline(0, color="k", linewidth=0.5, linestyle="--")
     axes[0].set_ylim(-0.04, 0.04)
     if delta_V is not None:
@@ -103,7 +103,7 @@ def plot_fig7(sol_chg=None, sol_dis=None, save_path="half_cell_fig7_ocp_vs_theta
         if mask.any():
             axes[1].plot(theta[mask], shift[mask], linewidth=1.5, label=label)
     axes[1].set_xlabel("Electrode SOC (θ)")
-    axes[1].set_ylabel("U_eq_p0 − OCP [V]")
+    axes[1].set_ylabel("U_eq_p0 − φ_s [V]")
     axes[1].set_title("Zoom: hook region (θ ≈ 0.10–0.35)")
     axes[1].axhline(0, color="k", linewidth=0.5, linestyle="--")
     axes[1].legend()
@@ -115,7 +115,7 @@ def plot_fig7(sol_chg=None, sol_dis=None, save_path="half_cell_fig7_ocp_vs_theta
         if mask.any():
             axes[2].plot(theta[mask], shift[mask], linewidth=1.5, label=label)
     axes[2].set_xlabel("Electrode SOC (θ)")
-    axes[2].set_ylabel("U_eq_p0 − OCP [V]")
+    axes[2].set_ylabel("U_eq_p0 − φ_s [V]")
     axes[2].set_title("Zoom: shoulder region (θ ≈ 0.65–0.93)")
     axes[2].axhline(0, color="k", linewidth=0.5, linestyle="--")
     axes[2].legend()

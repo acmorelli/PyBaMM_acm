@@ -17,6 +17,13 @@ class CCPMOpenCircuitPotential(BaseOpenCircuitPotential):
     in the particle model.
     """
 
+    def __init__(self, param, domain, reaction, options, phase="primary",
+                 x_average=False, omega=None):
+        super().__init__(param, domain, reaction, options, phase, x_average)
+        if omega is None:
+            raise ValueError("omega is required for CCPMOpenCircuitPotential")
+        self.omega = pybamm.Scalar(omega)
+
     def get_coupled_variables(self, variables):
         domain, Domain = self.domain_Domain
         phase_name = self.phase_name
@@ -31,16 +38,15 @@ class CCPMOpenCircuitPotential(BaseOpenCircuitPotential):
         F = pybamm.constants.F
         R = pybamm.constants.R
         U_eq_p0 = pybamm.Scalar(3.397) 
-        omega = 4.5 - (2.5 / 0.18e9 ) * 3 / self.param.p.prim.R  
 
         #  OCP: U_eq_eff = U_eq_p0 - μ_p(θ)/F
         ocp_surf = U_eq_p0 - (R * T / F) * (
             pybamm.log(theta_CCPM / (1 - theta_CCPM))
-            + omega * (1 - 2 * theta_CCPM)
+            + self.omega * (1 - 2 * theta_CCPM)
         )
         ocp_bulk = U_eq_p0 - (R * T_bulk / F) * (
             pybamm.log(theta_CCPM_av / (1 - theta_CCPM_av))
-            + omega * (1 - 2 * theta_CCPM_av)
+            + self.omega * (1 - 2 * theta_CCPM_av)
         )
         dUdT = pybamm.Scalar(0)  # TODO: entropic change for CCPM
 
